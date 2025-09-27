@@ -29,8 +29,8 @@ export async function POST(req: NextRequest) {
     ],
     mode: 'subscription',
     success_url:
-      'http://d5a38b302283.ngrok-free.app/billing?session_id={CHECKOUT_SESSION_ID}',
-    cancel_url: 'http://d5a38b302283.ngrok-free.app/billing',
+      'http://fusion-flow2.vercel.app/billing?session_id={CHECKOUT_SESSION_ID}',
+    cancel_url: 'http://fusion-flow2.vercel.app/billing',
   })
   return NextResponse.json(session.url)
 }
