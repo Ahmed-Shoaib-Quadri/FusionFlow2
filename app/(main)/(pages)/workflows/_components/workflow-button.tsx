@@ -26,7 +26,7 @@ const WorkflowButton = (props:Props) => {
     return (
         <Button 
          size={'icon'}
-         {...(credits !== '0'
+         {...(credits && credits !== '0'
             ? {
                 onClick: handleClick,
             }

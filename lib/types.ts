@@ -36,12 +36,26 @@ export type EditorCanvasTypes =
  | 'Action'
  | 'Wait';
 
+export type WorkflowTriggerType =
+ | 'google_drive'
+ | 'manual'
+ | 'scheduled'
+ | 'webhook'
+
+export type TriggerMetadata = {
+    triggerType?: WorkflowTriggerType
+    isConfigured?: boolean
+    isEnabled?: boolean
+    scheduleInterval?: '5m' | '15m' | '30m' | '1h' | '24h'
+    webhookSecret?: string
+}
+
 export type EditorCanvasCardType = {
     title: string
     description: string
     completed: boolean
     current: boolean
-    metadata: any
+    metadata: Record<string, any> | TriggerMetadata
     type: EditorCanvasTypes
 }
 
@@ -82,6 +96,12 @@ export type EditorActions =
     type: 'SELECTED_ELEMENT'
     payload: {
         element: EditorNode
+    }
+ }
+ | {
+    type: 'DELETE_NODE'
+    payload: {
+        nodeId: string
     }
  }
 

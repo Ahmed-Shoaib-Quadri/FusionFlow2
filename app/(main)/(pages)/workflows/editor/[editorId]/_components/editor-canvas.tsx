@@ -14,6 +14,7 @@ import { EditorCanvasDefaultCardTypes } from '@/lib/constant';
 import FlowInstance from './flow-instance';
 import EditorCanvasSidebar from './editor-canvas-sidebar';
 import { onGetNodesEdges, onSaveWorkflow } from '../../../_actions/workflow-connections';
+import { EMPTY_EDITOR_NODE } from '@/lib/workflow-definition';
 
 type Props = {}
 
@@ -109,22 +110,37 @@ const EditorCanvas = () => {
       dispatch({
         type: 'SELECTED_ELEMENT',
         payload: {
-          element: {
-            data: {
-              completed: false,
-              current: false,
-              description: '',
-              metadata: {},
-              title: '',
-              type: 'Trigger',
-            },
-            id: '',
-            position: { x: 0, y: 0},
-            type: 'Trigger',
-          },
+          element: EMPTY_EDITOR_NODE,
         },
       })
     }
+
+    const deleteNodeById = useCallback((nodeId: string) => {
+      if (!nodeId) return
+
+      setNodes((currentNodes) => currentNodes.filter((node) => node.id !== nodeId))
+      setEdges((currentEdges) =>
+        currentEdges.filter(
+          (edge) => edge.source !== nodeId && edge.target !== nodeId
+        )
+      )
+
+      dispatch({
+        type: 'DELETE_NODE',
+        payload: { nodeId },
+      })
+    }, [dispatch])
+
+    const handleDeleteSelectedNode = useCallback(() => {
+      const selectedNodeId = state.editor.selectedNode.id
+      if (!selectedNodeId) {
+        toast.message('Select a node to delete')
+        return
+      }
+
+      deleteNodeById(selectedNodeId)
+      toast.success('Node deleted')
+    }, [deleteNodeById, state.editor.selectedNode.id])
 
     // Auto-save functionality
     const saveWorkflow = useCallback(async (isAutoSave = false) => {
@@ -169,7 +185,7 @@ const EditorCanvas = () => {
 
     useEffect(() => {
       dispatch({type: 'LOAD_DATA', payload: {edges, elements: nodes }})
-    },[nodes,edges])
+    },[dispatch, nodes, edges])
   
     const nodeTypes = useMemo(
         () => ({
@@ -194,8 +210,8 @@ const EditorCanvas = () => {
       try {
         const response = await onGetNodesEdges(workflowId);
         if (response) {
-          const parsedNodes = JSON.parse(response.nodes!);
-          const parsedEdges = JSON.parse(response.edges!);
+          const parsedNodes = response.nodes ? JSON.parse(response.nodes) : [];
+          const parsedEdges = response.edges ? JSON.parse(response.edges) : [];
           setEdges(parsedEdges);
           setNodes(parsedNodes);
           setLastSaved(new Date())
@@ -224,6 +240,29 @@ const EditorCanvas = () => {
       document.addEventListener('keydown', handleKeyDown)
       return () => document.removeEventListener('keydown', handleKeyDown)
     }, [saveWorkflow])
+
+    useEffect(() => {
+      const handleDeleteKey = (event: KeyboardEvent) => {
+        const target = event.target as HTMLElement | null
+        const tagName = target?.tagName?.toLowerCase()
+        const isTypingTarget =
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          target?.isContentEditable
+
+        if (isTypingTarget) return
+
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          if (state.editor.selectedNode.id) {
+            event.preventDefault()
+            handleDeleteSelectedNode()
+          }
+        }
+      }
+
+      document.addEventListener('keydown', handleDeleteKey)
+      return () => document.removeEventListener('keydown', handleDeleteKey)
+    }, [handleDeleteSelectedNode, state.editor.selectedNode.id])
     
   return (
     <ResizablePanelGroup 
@@ -259,7 +298,7 @@ const EditorCanvas = () => {
              className='w-[300px]'
              onDrop={onDrop}
              onDragOver={onDragOver}
-             nodes={state.editor.elements}
+             nodes={nodes}
              onNodesChange={onNodesChange}
              edges={edges}
              onEdgesChange={onEdgesChange}
@@ -321,6 +360,14 @@ const EditorCanvas = () => {
                 </div>
               )}
               <div className="flex items-center gap-2 ml-2">
+                <button
+                  onClick={handleDeleteSelectedNode}
+                  disabled={!state.editor.selectedNode.id}
+                  className="text-xs px-2 py-1 rounded transition-colors bg-red-100 text-red-700 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-red-900/20 dark:text-red-400"
+                  title="Delete selected node"
+                >
+                  Delete node
+                </button>
                 <button
                   onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
                   className={`text-xs px-2 py-1 rounded transition-colors ${

@@ -11,7 +11,7 @@ export type WorkflowExecutionData = {
   workflowId: string
   userId: string
   status: 'success' | 'failed' | 'partial'
-  triggerType: 'google_drive' | 'manual' | 'scheduled'
+  triggerType: 'google_drive' | 'manual' | 'scheduled' | 'webhook'
   results?: ExecutionResult[]
   error?: string
   startedAt?: Date

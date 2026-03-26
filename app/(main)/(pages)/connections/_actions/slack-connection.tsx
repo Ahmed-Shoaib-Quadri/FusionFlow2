@@ -116,11 +116,14 @@ export const postMessageToSlack = async (
   if (!selectedSlackChannels?.length) return { message: 'Channel not selected' }
 
   try {
-    selectedSlackChannels
-      .map((channel) => channel?.value)
-      .forEach((channel) => {
-        postMessageInSlackChannel(slackAccessToken, channel, content)
-      })
+    await Promise.all(
+      selectedSlackChannels
+        .map((channel) => channel?.value)
+        .filter(Boolean)
+        .map((channel) =>
+          postMessageInSlackChannel(slackAccessToken, channel!, content)
+        )
+    )
   } catch (error) {
     return { message: 'Message could not be sent to Slack' }
   }

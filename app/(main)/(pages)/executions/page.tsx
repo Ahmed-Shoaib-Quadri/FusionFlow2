@@ -21,15 +21,12 @@ import Link from 'next/link'
 const ExecutionsPage = async ({
   searchParams,
 }: {
-  searchParams:
-    | { status?: string; workflow?: string; page?: string }
-    | Promise<{ status?: string; workflow?: string; page?: string }>
+  searchParams: Promise<{ status?: string; workflow?: string; page?: string }>
 }) => {
 
   const user = await currentUser()
   if (!user) return <div>Not authenticated</div>
 
-  // FIX: Await searchParams before using
   const sp = (await searchParams) || {}
 
   const page = parseInt(sp.page || '1')
@@ -58,6 +55,15 @@ const ExecutionsPage = async ({
   ])
 
   const totalPages = Math.ceil(totalCount / limit)
+  const buildPageHref = (nextPage: number) => {
+    const params = new URLSearchParams()
+
+    if (sp.status) params.set('status', sp.status)
+    if (sp.workflow) params.set('workflow', sp.workflow)
+    params.set('page', nextPage.toString())
+
+    return `/executions?${params.toString()}`
+  }
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -198,31 +204,19 @@ const ExecutionsPage = async ({
               <div className="flex gap-2">
                 {/* Previous */}
                 {page > 1 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const url = new URL(window.location.href)
-                      url.searchParams.set('page', (page - 1).toString())
-                      window.location.href = url.toString()
-                    }}
-                  >
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={buildPageHref(page - 1)}>
                     Previous
+                    </Link>
                   </Button>
                 )}
 
                 {/* Next */}
                 {page < totalPages && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const url = new URL(window.location.href)
-                      url.searchParams.set('page', (page + 1).toString())
-                      window.location.href = url.toString()
-                    }}
-                  >
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={buildPageHref(page + 1)}>
                     Next
+                    </Link>
                   </Button>
                 )}
               </div>

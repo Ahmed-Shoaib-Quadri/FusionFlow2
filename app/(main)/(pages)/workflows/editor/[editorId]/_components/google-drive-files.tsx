@@ -15,13 +15,15 @@ const GoogleDriveFiles = () => {
 
     const reqGoogle = async () => {
         setLoading(true)
-        const response = await axios.get('/api/drive-activity')
-        if (response) {
-            toast.message(response.data)
-            setLoading(false)
-            setIsListening(true)
+        try {
+          const response = await axios.get('/api/drive-activity')
+          if (response) {
+              toast.message(typeof response.data === 'string' ? response.data : 'Listener created')
+              setIsListening(true)
+          }
+        } finally {
+          setLoading(false)
         }
-        setIsListening(false);   
     }
 
     const onListener = async () => {

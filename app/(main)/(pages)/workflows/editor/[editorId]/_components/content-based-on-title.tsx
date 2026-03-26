@@ -49,14 +49,13 @@ const ContentBasedOnTitle = ({
         const reqGoogle = async () => {
             const response: { data: { message: { files: any} } } = await axios.get('/api/drive');
             if(response) {
-                toast.message("Fetched File");
                 setFile(response.data.message.files[0]);
             } else {
                 toast.error('Something went wrong');
             }
         }
         reqGoogle();
-    },[]);
+    }, [setFile]);
 
     //@ts-ignore
     const nodeConnectionType: any = nodeConnection[nodeMapper[title]];
@@ -65,17 +64,13 @@ const ContentBasedOnTitle = ({
     const isConnected = 
     title === 'Google Drive'
     ? !nodeConnection.isLoading
-    : !nodeConnectionType[
-        `s{
-         title === 'Slack'
-         ? 'slackAccessToken'
-         : title === 'Discord'
-         ? 'webhookURL'
-         : title === 'Notion'
-         ? 'accessToken'
-         : '' 
-        }`
-    ]
+    : title === 'Slack'
+    ? !!nodeConnectionType.slackAccessToken
+    : title === 'Discord'
+    ? !!nodeConnectionType.webhookURL
+    : title === 'Notion'
+    ? !!nodeConnectionType.accessToken
+    : false
 
     if(!isConnected) return <p>Not Connected</p>
   return (

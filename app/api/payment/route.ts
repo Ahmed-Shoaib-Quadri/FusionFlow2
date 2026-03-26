@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const baseUrl = (process.env.NEXT_PUBLIC_URL || 'http://localhost:3000').trim()
   const stripe = new Stripe(process.env.STRIPE_SECRET!, {
     typescript: true,
     apiVersion: '2025-05-28.basil',
@@ -28,9 +29,8 @@ export async function POST(req: NextRequest) {
       },
     ],
     mode: 'subscription',
-    success_url:
-      'http://90ef-124-123-184-84.ngrok-free.app/billing?session_id={CHECKOUT_SESSION_ID}',
-    cancel_url: 'http://90ef-124-123-184-84.ngrok-free.app/billing',
+    success_url: `${baseUrl}/billing?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${baseUrl}/billing`,
   })
   return NextResponse.json(session.url)
 }

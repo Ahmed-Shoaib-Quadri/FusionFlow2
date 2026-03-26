@@ -71,7 +71,7 @@ const BillingDashboard = (props: Props) => {
          </div>
          <CreditTracker
           tier ={tier}
-          credits ={parseInt(credits)}
+          credits ={Number.isNaN(parseInt(credits, 10)) ? 0 : parseInt(credits, 10)}
          />
         </>
       {/* )} */}
