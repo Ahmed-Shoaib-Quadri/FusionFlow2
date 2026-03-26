@@ -10,8 +10,8 @@ import { BillingProvider } from "./providers/billing-provider";
 const font = DM_Sans({subsets:['latin']});
 
 export const metadata: Metadata = {
-  title: "AutoFlow.",
-  description: "Automate Your Work With AutoFlow.",
+  title: "FusionFlow.",
+  description: "Automate Your Work With FusionFlow.",
 };
 
 export default function RootLayout({
@@ -25,7 +25,7 @@ export default function RootLayout({
     >
     <html lang="en" suppressHydrationWarning>
         <head>
-          <title>AutoFlow</title>
+          <title>FusionFlow</title>
           <meta name="description" content="Connect Google, Slack, Notion..."/>
         </head>
         <body className={font.className}>

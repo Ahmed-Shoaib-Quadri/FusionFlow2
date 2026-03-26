@@ -1,4 +1,5 @@
 import Category from "@/app/components/icons/category";
+import Logs from "@/app/components/icons/clipboard";
 import Home from "@/app/components/icons/home";
 import Payment from "@/app/components/icons/payment";
 import Settings from "@/app/components/icons/settings";
@@ -93,6 +94,7 @@ export const products=[
 export const menuOptions = [
   { name: 'Dashboard', Component: Home, href: '/dashboard' },
   { name: 'Workflows', Component: Workflows, href: '/workflows' },
+  { name: 'Executions', Component: Logs, href: '/executions' },
   { name: 'Settings', Component: Settings, href: '/settings' },
   { name: 'Connections', Component: Category, href: '/connections' },
   { name: 'Billing', Component: Payment, href: '/billing' },
