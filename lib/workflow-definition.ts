@@ -4,6 +4,8 @@ export type WorkflowEdge = {
   id: string
   source: string
   target: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
 }
 
 export const DEFAULT_TRIGGER_TYPE: WorkflowTriggerType = 'google_drive'
@@ -76,7 +78,7 @@ export function buildWorkflowPath(nodes: EditorNode[], edges: WorkflowEdge[]) {
   })
 
   const visited = new Set<string>()
-  const orderedTypes: string[] = []
+  const orderedNodeIds: string[] = []
 
   const visit = (nodeId: string) => {
     const targets = adjacency.get(nodeId) || []
@@ -87,13 +89,21 @@ export function buildWorkflowPath(nodes: EditorNode[], edges: WorkflowEdge[]) {
       const targetNode = nodes.find((node) => node.id === targetId)
       if (!targetNode) return
 
-      orderedTypes.push(targetNode.type)
+      orderedNodeIds.push(targetNode.id)
       visit(targetId)
     })
   }
 
   visit(triggerNode.id)
-  return orderedTypes
+  return orderedNodeIds
+}
+
+export function getNodeById(nodes: EditorNode[], nodeId: string) {
+  return nodes.find((node) => node.id === nodeId) || null
+}
+
+export function getOutgoingEdges(edges: WorkflowEdge[], nodeId: string) {
+  return edges.filter((edge) => edge.source === nodeId)
 }
 
 export function validateWorkflowDefinition(

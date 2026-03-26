@@ -2,9 +2,11 @@ import { db } from '@/lib/db'
 
 export type ExecutionResult = {
   node: string
-  status: 'success' | 'failed'
+  status: 'success' | 'failed' | 'scheduled' | 'skipped'
   reason?: string
   error?: string
+  output?: string
+  nodeId?: string
 }
 
 export type WorkflowExecutionData = {

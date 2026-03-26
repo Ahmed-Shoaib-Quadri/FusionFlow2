@@ -27,6 +27,7 @@ export type EditorCanvasTypes =
  | 'Email'
  | 'Condition'
  | 'AI'
+ | 'Discord'
  | 'Slack'
  | 'Google Drive'
  | 'Notion'
@@ -48,6 +49,42 @@ export type TriggerMetadata = {
     isEnabled?: boolean
     scheduleInterval?: '5m' | '15m' | '30m' | '1h' | '24h'
     webhookSecret?: string
+    scheduledJobId?: string
+}
+
+export type WorkflowComparisonOperator =
+ | 'equals'
+ | 'not_equals'
+ | 'contains'
+ | 'not_contains'
+ | 'greater_than'
+ | 'less_than'
+
+export type WorkflowNodeMetadata = TriggerMetadata & {
+    content?: string
+    contentType?: 'text' | 'json'
+    channels?: string[]
+    notionContent?: string
+    waitMinutes?: number
+    webhookUrl?: string
+    webhookMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH'
+    webhookHeaders?: string
+    emailTo?: string
+    emailSubject?: string
+    emailBody?: string
+    emailFrom?: string
+    aiPrompt?: string
+    aiModel?: string
+    calendarSummary?: string
+    calendarDescription?: string
+    calendarStart?: string
+    calendarEnd?: string
+    actionValue?: string
+    conditionLeft?: string
+    conditionRight?: string
+    conditionOperator?: WorkflowComparisonOperator
+    selectedOutput?: string
+    lastRunPreview?: string
 }
 
 export type EditorCanvasCardType = {
@@ -55,7 +92,7 @@ export type EditorCanvasCardType = {
     description: string
     completed: boolean
     current: boolean
-    metadata: Record<string, any> | TriggerMetadata
+    metadata: WorkflowNodeMetadata
     type: EditorCanvasTypes
 }
 
@@ -80,6 +117,8 @@ export type EditorActions =
             id: string
             source: string
             target: string
+            sourceHandle?: string | null
+            targetHandle?: string | null
         }[]
     }
  }

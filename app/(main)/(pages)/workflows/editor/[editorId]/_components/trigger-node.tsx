@@ -1,24 +1,17 @@
 'use client'
 import React, { useEffect, useMemo, useState } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import {
-  MousePointerClickIcon,
-  Globe,
-  Clock,
-  Link2,
-  PlayCircle,
-} from 'lucide-react'
+import { useNodeId, useReactFlow, Position } from 'reactflow'
 import { useEditor } from '@/app/providers/editor-provider'
-import { useNodeId } from 'reactflow'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import {
   DEFAULT_SCHEDULE_INTERVAL,
   DEFAULT_TRIGGER_TYPE,
 } from '@/lib/workflow-definition'
 import { EditorCanvasTypes, TriggerMetadata, WorkflowTriggerType } from '@/lib/types'
+import { CalendarClock, Link2, MousePointerClickIcon, PlayCircle, Trash2 } from 'lucide-react'
+import CustomHandle from './custom-handle'
 
 type TriggerNodeProps = {
   data: {
@@ -27,56 +20,49 @@ type TriggerNodeProps = {
     type: string
     completed: boolean
     current: boolean
-    metadata: Record<string, any>
+    metadata: Record<string, unknown>
   }
 }
 
-const triggerTypes: {
+const triggerTypes: Array<{
   id: WorkflowTriggerType
-  name: string
-  description: string
+  title: string
+  subtitle: string
   icon: React.ReactNode
-}[] = [
+}> = [
   {
     id: 'google_drive',
-    name: 'Google Drive',
-    description: 'Run the workflow when your connected Google Drive changes.',
-    icon: <Globe className="h-4 w-4" />,
-  },
-  {
-    id: 'scheduled',
-    name: 'Schedule',
-    description: 'Run automatically on a recurring interval.',
-    icon: <Clock className="h-4 w-4" />,
-  },
-  {
-    id: 'webhook',
-    name: 'Webhook',
-    description: 'Run when this workflow endpoint receives a request.',
-    icon: <Link2 className="h-4 w-4" />,
+    title: 'Google Drive',
+    subtitle: 'Run when Drive changes arrive through the listener',
+    icon: <MousePointerClickIcon className="h-4 w-4" />,
   },
   {
     id: 'manual',
-    name: 'Manual',
-    description: 'Run on demand from the UI or API.',
+    title: 'Manual',
+    subtitle: 'Run directly from the workflow card or execute route',
     icon: <PlayCircle className="h-4 w-4" />,
   },
-]
-
-const scheduleOptions: NonNullable<TriggerMetadata['scheduleInterval']>[] = [
-  '5m',
-  '15m',
-  '30m',
-  '1h',
-  '24h',
+  {
+    id: 'scheduled',
+    title: 'Scheduled',
+    subtitle: 'Run repeatedly on a chosen interval',
+    icon: <CalendarClock className="h-4 w-4" />,
+  },
+  {
+    id: 'webhook',
+    title: 'Webhook',
+    subtitle: 'Run when the workflow endpoint is called',
+    icon: <Link2 className="h-4 w-4" />,
+  },
 ]
 
 const TriggerNode = ({ data }: TriggerNodeProps) => {
   const nodeId = useNodeId()
+  const { deleteElements } = useReactFlow()
   const { dispatch, state } = useEditor()
   const [triggerType, setTriggerType] = useState<WorkflowTriggerType>(DEFAULT_TRIGGER_TYPE)
-  const [isConfigured, setIsConfigured] = useState(false)
   const [isEnabled, setIsEnabled] = useState(true)
+  const [isConfigured, setIsConfigured] = useState(false)
   const [scheduleInterval, setScheduleInterval] = useState<
     NonNullable<TriggerMetadata['scheduleInterval']>
   >(DEFAULT_SCHEDULE_INTERVAL)
@@ -88,8 +74,7 @@ const TriggerNode = ({ data }: TriggerNodeProps) => {
   )
 
   const webhookUrl = useMemo(() => {
-    if (!webhookSecret) return ''
-    if (typeof window === 'undefined') return ''
+    if (!webhookSecret || !nodeId || typeof window === 'undefined') return ''
     return `${window.location.origin}/api/workflows/webhook/${nodeId}?token=${webhookSecret}`
   }, [nodeId, webhookSecret])
 
@@ -97,12 +82,12 @@ const TriggerNode = ({ data }: TriggerNodeProps) => {
     if (!nodeId) return
 
     const nextMetadata: TriggerMetadata = {
+      ...(data.metadata as TriggerMetadata),
       triggerType,
-      isConfigured,
       isEnabled,
+      isConfigured,
       scheduleInterval,
       webhookSecret,
-      ...(data.metadata || {}),
       ...partial,
     }
 
@@ -112,69 +97,55 @@ const TriggerNode = ({ data }: TriggerNodeProps) => {
         nodeId,
         data: {
           ...data,
+          type: data.type as EditorCanvasTypes,
           completed: data.completed,
           current: data.current,
-          type: data.type as EditorCanvasTypes,
           metadata: nextMetadata,
         },
       },
     })
   }
 
-  const handleNodeClick = () => {
-    if (currentNode) {
-      dispatch({
-        type: 'SELECTED_ELEMENT',
-        payload: {
-          element: currentNode,
-        },
-      })
-    }
-  }
-
-  const handleTriggerTypeChange = (type: WorkflowTriggerType) => {
-    const nextConfigured = type === 'google_drive' || type === 'manual'
-    setTriggerType(type)
-    setIsConfigured(nextConfigured)
-
-    const nextSecret =
-      type === 'webhook' && !webhookSecret
-        ? crypto.randomUUID().replace(/-/g, '')
-        : webhookSecret
-
-    if (type === 'webhook') {
-      setWebhookSecret(nextSecret)
-    }
-
-    persistMetadata({
-      triggerType: type,
-      isConfigured: nextConfigured || type === 'webhook',
-      scheduleInterval:
-        type === 'scheduled' ? scheduleInterval || DEFAULT_SCHEDULE_INTERVAL : scheduleInterval,
-      webhookSecret: type === 'webhook' ? nextSecret : webhookSecret,
-      isEnabled,
+  const selectNode = () => {
+    if (!currentNode) return
+    dispatch({
+      type: 'SELECTED_ELEMENT',
+      payload: {
+        element: currentNode,
+      },
     })
   }
 
-  const handleToggleEnabled = () => {
+  const handleTriggerTypeChange = (nextType: WorkflowTriggerType) => {
+    const generatedWebhookSecret =
+      nextType === 'webhook'
+        ? webhookSecret || crypto.randomUUID().replace(/-/g, '')
+        : webhookSecret
+
+    const nextConfigured =
+      nextType === 'google_drive' ||
+      nextType === 'manual' ||
+      nextType === 'scheduled' ||
+      !!generatedWebhookSecret
+
+    setTriggerType(nextType)
+    setWebhookSecret(generatedWebhookSecret)
+    setIsConfigured(nextConfigured)
+
+    persistMetadata({
+      triggerType: nextType,
+      webhookSecret: generatedWebhookSecret,
+      isConfigured: nextConfigured,
+    })
+  }
+
+  const toggleEnabled = () => {
     const nextEnabled = !isEnabled
     setIsEnabled(nextEnabled)
     persistMetadata({ isEnabled: nextEnabled })
   }
 
-  const handleScheduleChange = (
-    nextInterval: NonNullable<TriggerMetadata['scheduleInterval']>
-  ) => {
-    setScheduleInterval(nextInterval)
-    setIsConfigured(true)
-    persistMetadata({
-      triggerType: 'scheduled',
-      scheduleInterval: nextInterval,
-      isConfigured: true,
-    })
-  }
-
-  const generateWebhookSecret = () => {
+  const regenerateWebhookSecret = () => {
     const nextSecret = crypto.randomUUID().replace(/-/g, '')
     setWebhookSecret(nextSecret)
     setIsConfigured(true)
@@ -188,124 +159,158 @@ const TriggerNode = ({ data }: TriggerNodeProps) => {
   useEffect(() => {
     const metadata = (data.metadata || {}) as TriggerMetadata
     setTriggerType(metadata.triggerType || DEFAULT_TRIGGER_TYPE)
-    setIsConfigured(metadata.isConfigured ?? false)
     setIsEnabled(metadata.isEnabled !== false)
+    setIsConfigured(metadata.isConfigured ?? false)
     setScheduleInterval(metadata.scheduleInterval || DEFAULT_SCHEDULE_INTERVAL)
     setWebhookSecret(metadata.webhookSecret || '')
   }, [data.metadata])
 
   return (
-    <Card
-      onClick={handleNodeClick}
-      className={`relative max-w-[420px] cursor-pointer transition-all duration-200 hover:shadow-lg ${
-        state.editor.selectedNode.id === nodeId ? 'ring-2 ring-primary' : ''
-      }`}
-    >
-      <CardHeader className="flex flex-row items-center gap-4 pb-3">
-        <div className="flex items-center justify-center w-12 h-12 bg-primary/10 rounded-lg">
-          <MousePointerClickIcon className="h-6 w-6 text-primary" />
-        </div>
-        <div className="flex-1">
-          <CardTitle className="text-lg flex items-center gap-2">
-            {data.title}
-            <Badge variant="secondary" className="text-xs capitalize">
-              {triggerType.replace('_', ' ')}
-            </Badge>
-          </CardTitle>
-          <CardDescription className="text-sm">{data.description}</CardDescription>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch checked={isEnabled} onCheckedChange={handleToggleEnabled} />
-          <Badge variant={isEnabled ? 'default' : 'secondary'}>
-            {isEnabled ? 'Active' : 'Inactive'}
-          </Badge>
-        </div>
-      </CardHeader>
+    <>
+      <div
+        onClick={selectNode}
+        className={`relative min-w-[360px] max-w-[430px] rounded-2xl border bg-card p-4 shadow-sm transition-all ${
+          state.editor.selectedNode.id === nodeId ? 'ring-2 ring-primary' : ''
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <MousePointerClickIcon className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold">{data.title}</h3>
+                <Badge variant="secondary" className="capitalize">
+                  {triggerType.replace('_', ' ')}
+                </Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">{data.description}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground/70">Node ID: {nodeId}</p>
+            </div>
+          </div>
 
-      <CardContent className="pt-0 space-y-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Trigger Type</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {triggerTypes.map((type) => (
-              <Button
-                key={type.id}
-                type="button"
-                variant={triggerType === type.id ? 'default' : 'outline'}
-                className="h-auto justify-start gap-2 px-3 py-3"
-                onClick={() => handleTriggerTypeChange(type.id)}
-              >
-                {type.icon}
-                <span className="text-left">
-                  <span className="block text-xs font-semibold">{type.name}</span>
-                  <span className="block text-[11px] opacity-80">{type.description}</span>
-                </span>
-              </Button>
-            ))}
+          <div className="flex items-center gap-2">
+            <Switch checked={isEnabled} onCheckedChange={toggleEnabled} />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              onClick={async (event) => {
+                event.stopPropagation()
+                if (!nodeId) return
+                await deleteElements({ nodes: [{ id: nodeId }] })
+                dispatch({
+                  type: 'DELETE_NODE',
+                  payload: { nodeId },
+                })
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
         </div>
 
-        {triggerType === 'google_drive' && (
-          <div className="rounded-lg border p-3 text-sm text-muted-foreground">
-            This workflow will run when the connected Google Drive listener receives a file
-            change event.
-          </div>
-        )}
-
-        {triggerType === 'manual' && (
-          <div className="rounded-lg border p-3 text-sm text-muted-foreground">
-            This workflow can be executed from the workflow UI or the manual execution API.
-          </div>
-        )}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {triggerTypes.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                handleTriggerTypeChange(item.id)
+              }}
+              className={`rounded-xl border px-3 py-3 text-left transition-colors ${
+                triggerType === item.id
+                  ? 'border-primary bg-primary/10'
+                  : 'border-border bg-background hover:bg-muted/50'
+              }`}
+            >
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                {item.icon}
+                {item.title}
+              </div>
+              <p className="text-xs text-muted-foreground">{item.subtitle}</p>
+            </button>
+          ))}
+        </div>
 
         {triggerType === 'scheduled' && (
-          <div className="space-y-3 rounded-lg border p-3">
-            <Label className="text-sm font-medium">Run interval</Label>
+          <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Schedule interval
+            </p>
             <div className="flex flex-wrap gap-2">
-              {scheduleOptions.map((option) => (
+              {(['5m', '15m', '30m', '1h', '24h'] as const).map((option) => (
                 <Button
                   key={option}
                   type="button"
-                  variant={scheduleInterval === option ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => handleScheduleChange(option)}
+                  variant={scheduleInterval === option ? 'default' : 'outline'}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setScheduleInterval(option)
+                    setIsConfigured(true)
+                    persistMetadata({
+                      triggerType: 'scheduled',
+                      scheduleInterval: option,
+                      isConfigured: true,
+                    })
+                  }}
                 >
                   {option}
                 </Button>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Publishing a scheduled workflow creates or refreshes the external cron job.
-            </p>
           </div>
         )}
 
         {triggerType === 'webhook' && (
-          <div className="space-y-3 rounded-lg border p-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium">Webhook secret</Label>
-              <Button type="button" variant="outline" size="sm" onClick={generateWebhookSecret}>
+          <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Webhook endpoint
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  regenerateWebhookSecret()
+                }}
+              >
                 {webhookSecret ? 'Regenerate' : 'Generate'}
               </Button>
             </div>
-            <div className="rounded-md bg-muted px-3 py-2 text-xs break-all">
-              {webhookSecret || 'Generate a secret to enable this webhook trigger.'}
-            </div>
-            <div className="rounded-md bg-muted px-3 py-2 text-xs break-all">
-              {webhookUrl || 'Publish the workflow after generating a secret to use this URL.'}
-            </div>
+            <p className="mb-2 break-all rounded-lg bg-background px-3 py-2 text-xs">
+              {webhookUrl || 'Generate a webhook secret to activate this endpoint.'}
+            </p>
             <p className="text-xs text-muted-foreground">
-              Send a `POST` or `GET` request to this URL with the token to execute the workflow.
+              Publish the workflow after connecting this trigger to at least one action node.
             </p>
           </div>
         )}
 
-        {!isConfigured && triggerType !== 'google_drive' && triggerType !== 'manual' && (
-          <p className="text-xs text-amber-600">
-            Finish configuring this trigger before publishing the workflow.
-          </p>
-        )}
-      </CardContent>
-    </Card>
+        <div className="mt-4 flex items-center gap-2">
+          <Badge variant={isEnabled ? 'default' : 'secondary'}>
+            {isEnabled ? 'Enabled' : 'Disabled'}
+          </Badge>
+          {isConfigured ? (
+            <Badge variant="outline">Configured</Badge>
+          ) : (
+            <Badge variant="outline">Needs setup</Badge>
+          )}
+        </div>
+      </div>
+
+      <CustomHandle
+        type="source"
+        position={Position.Bottom}
+        id="trigger-source"
+      />
+    </>
   )
 }
 
