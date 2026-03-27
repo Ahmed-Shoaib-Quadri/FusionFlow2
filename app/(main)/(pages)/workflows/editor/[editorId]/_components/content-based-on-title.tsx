@@ -112,12 +112,85 @@ const ContentBasedOnTitle = ({
     if (!file || Object.keys(file).length === 0) return null
     if (title === 'Google Drive') return null
 
+    const appendToken = (template: string) => {
+      switch (title) {
+        case 'Discord': {
+          const nextContent = metadata.content
+            ? `${metadata.content} ${template}`.trim()
+            : template
+          updateMetadata({ content: nextContent })
+          nodeConnection.setDiscordNode((prev: any) => ({
+            ...prev,
+            content: nextContent,
+          }))
+          break
+        }
+        case 'Slack': {
+          const nextContent = metadata.content
+            ? `${metadata.content} ${template}`.trim()
+            : template
+          updateMetadata({ content: nextContent })
+          nodeConnection.setSlackNode((prev: any) => ({
+            ...prev,
+            content: nextContent,
+          }))
+          break
+        }
+        case 'Notion': {
+          const nextContent = metadata.notionContent
+            ? `${metadata.notionContent} ${template}`.trim()
+            : template
+          updateMetadata({ notionContent: nextContent })
+          nodeConnection.setNotionNode((prev: any) => ({
+            ...prev,
+            content: nextContent,
+          }))
+          break
+        }
+        case 'Custom Webhook': {
+          const nextContent = metadata.content
+            ? `${metadata.content} ${template}`.trim()
+            : template
+          updateMetadata({ content: nextContent })
+          break
+        }
+        case 'Email': {
+          const nextContent = metadata.emailBody
+            ? `${metadata.emailBody} ${template}`.trim()
+            : template
+          updateMetadata({ emailBody: nextContent })
+          break
+        }
+        case 'AI': {
+          const nextContent = metadata.aiPrompt
+            ? `${metadata.aiPrompt} ${template}`.trim()
+            : template
+          updateMetadata({ aiPrompt: nextContent })
+          break
+        }
+        case 'Action': {
+          const nextContent = metadata.actionValue
+            ? `${metadata.actionValue} ${template}`.trim()
+            : template
+          updateMetadata({ actionValue: nextContent })
+          break
+        }
+        default:
+          break
+      }
+    }
+
     return (
       <Card className="w-full">
         <CardContent className="px-2 py-3">
           <div className="flex flex-col gap-4">
             <CardDescription>Drive file tokens</CardDescription>
-            <GoogleFileDetails nodeConnection={nodeConnection} title={title} gFile={file} />
+            <GoogleFileDetails
+              nodeConnection={nodeConnection}
+              title={title}
+              gFile={file}
+              onInsertToken={appendToken}
+            />
           </div>
         </CardContent>
       </Card>

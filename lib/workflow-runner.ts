@@ -552,8 +552,12 @@ const followWorkflowGraph = async (
       results.push(executionResult)
 
       const outgoing = getOutgoingEdges(edges, node.id)
-      if (outgoing[0]?.target) {
-        pendingNodeIds.unshift(outgoing[0].target)
+      if (outgoing.length > 0) {
+        const nextTargets = outgoing
+          .map((edge) => edge.target)
+          .filter((target, index, arr) => arr.indexOf(target) === index)
+
+        pendingNodeIds.unshift(...nextTargets.reverse())
       }
     } catch (error) {
       results.push({

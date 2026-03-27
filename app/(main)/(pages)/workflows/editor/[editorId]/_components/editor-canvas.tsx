@@ -386,12 +386,12 @@ const EditorCanvas = () => {
   return (
     <ResizablePanelGroup 
      direction='horizontal' 
-     className=''>
-      <ResizablePanel defaultSize={72}>
-        <div className='flex h-full items-center justify-center'>
+     className='h-full min-h-0'>
+      <ResizablePanel defaultSize={72} className='min-h-0'>
+        <div className='flex h-full min-h-0 items-center justify-center'>
           <div
            style={{ width: '100%', height: '100%' , paddingBottom:'70px'}}
-           className='relative'
+           className='relative min-h-0'
           >
              {isWorkFlowLoading ? (
               <div className="absolute flex h-full w-full items-center justify-center">
@@ -525,7 +525,7 @@ const EditorCanvas = () => {
       <ResizableHandle />
       <ResizablePanel
        defaultSize={28}
-       className='relative sm:block'
+       className='relative min-h-0 sm:block'
        >
         {isWorkFlowLoading ? (
           <div className="absolute flex h-full w-full items-center justify-center">

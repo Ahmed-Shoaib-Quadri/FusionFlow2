@@ -107,6 +107,13 @@ const editorReducer = (
             }
 
         case 'UPDATE_NODE':
+            const updatedSelectedNode =
+                state.editor.selectedNode.id === action.payload.nodeId
+                    ? {
+                          ...state.editor.selectedNode,
+                          data: action.payload.data,
+                      }
+                    : state.editor.selectedNode
             return {
                 ...state,
                 editor: {
@@ -116,6 +123,7 @@ const editorReducer = (
                             ? { ...element, data: action.payload.data }
                             : element
                     ),
+                    selectedNode: updatedSelectedNode,
                 },
             }
 

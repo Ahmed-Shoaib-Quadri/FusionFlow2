@@ -7,7 +7,7 @@ type Props = {}
 
 const Page = (props: Props) => {
   return (
-    <div  className='h-full'>
+    <div  className='h-full min-h-0'>
       <EditorProvider>
         <ConnectionsProvider>
             <EditorCanvas />

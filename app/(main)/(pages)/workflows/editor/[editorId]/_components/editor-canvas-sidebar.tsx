@@ -29,15 +29,20 @@ const EditorCanvasSidebar = ({
   const { state } = useEditor()
   const { nodeConnection } = useNodeConnections()
   const { googleFile, setSlackChannels } = useAutoFlowStore()
-  const lastHydratedNodeId = useRef<string>('')
+  const selectedNode = state.editor.selectedNode
+  const selectedNodeId = selectedNode.id
+  const selectedNodeTitle = selectedNode.data.title
+  const lastHydratedNodeKey = useRef<string>('')
 
   useEffect(() => {
-    const selectedNodeId = state.editor.selectedNode.id
-    if (state && selectedNodeId && lastHydratedNodeId.current !== selectedNodeId) {
-      lastHydratedNodeId.current = selectedNodeId
+    if (!selectedNodeId || !selectedNodeTitle) return
+
+    const hydrationKey = `${selectedNodeId}:${selectedNodeTitle}`
+    if (lastHydratedNodeKey.current !== hydrationKey) {
+      lastHydratedNodeKey.current = hydrationKey
       onConnections(nodeConnection, state, googleFile)
     }
-  }, [googleFile, nodeConnection, state])
+  }, [googleFile, nodeConnection, selectedNodeId, selectedNodeTitle, state])
 
   useEffect(() => {
     if (nodeConnection.slackNode.slackAccessToken) {
@@ -70,8 +75,8 @@ const EditorCanvasSidebar = ({
   )
 
   return (
-    <aside className="h-full overflow-hidden border-l bg-background/70 backdrop-blur-sm">
-      <Tabs defaultValue="palette" className="flex h-full flex-col overflow-hidden">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l bg-background/70 backdrop-blur-sm">
+      <Tabs defaultValue="palette" className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="sticky top-0 z-10 bg-background/95 px-4 pb-3 pt-4 backdrop-blur-sm">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="palette" className="cursor-pointer">
@@ -85,8 +90,9 @@ const EditorCanvasSidebar = ({
 
         <TabsContent
           value="palette"
-          className="mt-0 flex-1 overflow-y-auto space-y-6 p-4 pb-24"
+          className="mt-0 min-h-0 flex-1 overflow-hidden p-0"
         >
+          <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-24 pt-4">
           <div className="rounded-xl border bg-muted/30 p-4">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Starter node
@@ -161,12 +167,14 @@ const EditorCanvasSidebar = ({
               </div>
             </div>
           ) : null}
+          </div>
         </TabsContent>
 
         <TabsContent
           value="settings"
-          className="mt-0 flex-1 overflow-y-auto p-4 pb-24"
+          className="mt-0 min-h-0 flex-1 overflow-hidden p-0"
         >
+          <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-24 pt-4">
           <div className="mb-4 rounded-xl border bg-muted/20 p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Selected node
@@ -195,6 +203,7 @@ const EditorCanvasSidebar = ({
               <RenderOutputAccordion state={state} nodeConnection={nodeConnection} />
             </AccordionItem>
           </Accordion>
+          </div>
         </TabsContent>
       </Tabs>
     </aside>
