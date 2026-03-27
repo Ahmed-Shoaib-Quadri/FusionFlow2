@@ -21,6 +21,28 @@ type DriveChangeRecord = {
   } | null
 }
 
+const NOTIFICATION_LOCK_TTL_MS = 10_000
+const NOTIFICATION_DEDUPE_TTL_MS = 30_000
+
+const inflightNotifications = new Map<string, number>()
+const recentNotificationSignatures = new Map<string, number>()
+
+const pruneExpiredEntries = () => {
+  const now = Date.now()
+
+  for (const [key, timestamp] of inflightNotifications.entries()) {
+    if (now - timestamp > NOTIFICATION_LOCK_TTL_MS) {
+      inflightNotifications.delete(key)
+    }
+  }
+
+  for (const [key, timestamp] of recentNotificationSignatures.entries()) {
+    if (now - timestamp > NOTIFICATION_DEDUPE_TTL_MS) {
+      recentNotificationSignatures.delete(key)
+    }
+  }
+}
+
 const classifyDriveChange = (change: DriveChangeRecord) => {
   if (change.removed || change.file?.trashed) {
     return 'deleted' as const
@@ -104,6 +126,30 @@ const getGoogleDriveChanges = async (userId: string, pageToken: string) => {
   }
 }
 
+const dedupeDriveChanges = (changes: DriveChangeRecord[]) => {
+  const latestByFileAndType = new Map<string, DriveChangeRecord>()
+
+  changes.forEach((change) => {
+    const eventType = classifyDriveChange(change)
+    const fileId = change.fileId || change.file?.name || 'unknown-file'
+    latestByFileAndType.set(`${fileId}:${eventType}`, change)
+  })
+
+  return Array.from(latestByFileAndType.values())
+}
+
+const buildNotificationSignature = (changes: DriveChangeRecord[]) =>
+  dedupeDriveChanges(changes)
+    .map((change) => {
+      const eventType = classifyDriveChange(change)
+      const fileId = change.fileId || 'unknown-file'
+      const fileName = change.file?.name || 'unknown-name'
+      const modifiedTime = change.file?.modifiedTime || 'unknown-time'
+      return `${eventType}:${fileId}:${fileName}:${modifiedTime}`
+    })
+    .sort()
+    .join('|')
+
 export async function POST() {
   const headersList = await headers()
   const channelResourceId = headersList.get('x-goog-resource-id')
@@ -118,6 +164,17 @@ export async function POST() {
   }
 
   try {
+    pruneExpiredEntries()
+
+    if (inflightNotifications.has(channelResourceId)) {
+      return Response.json(
+        { message: 'Drive notification already being processed' },
+        { status: 200 }
+      )
+    }
+
+    inflightNotifications.set(channelResourceId, Date.now())
+
     const user = await db.user.findFirst({
       where: {
         googleResourceId: channelResourceId,
@@ -153,6 +210,16 @@ export async function POST() {
       return Response.json({ message: 'No new Drive changes' }, { status: 200 })
     }
 
+    const uniqueChanges = dedupeDriveChanges(changes)
+    const notificationSignature = `${user.clerkId}:${buildNotificationSignature(uniqueChanges)}`
+
+    if (recentNotificationSignatures.has(notificationSignature)) {
+      return Response.json(
+        { message: 'Duplicate Drive notification skipped' },
+        { status: 200 }
+      )
+    }
+
     await db.localGoogleCredential.updateMany({
       where: {
         userId: user.id,
@@ -162,8 +229,10 @@ export async function POST() {
       },
     })
 
+    recentNotificationSignatures.set(notificationSignature, Date.now())
+
     const detectedEventTypes = Array.from(
-      new Set(changes.map(classifyDriveChange))
+      new Set(uniqueChanges.map(classifyDriveChange))
     )
 
     const workflows = await db.workflows.findMany({
@@ -226,6 +295,7 @@ export async function POST() {
       {
         message: 'Workflows executed',
         detectedEventTypes,
+        processedChanges: uniqueChanges.length,
         results: executionResults,
       },
       { status: 200 }
@@ -238,5 +308,7 @@ export async function POST() {
       },
       { status: 500 }
     )
+  } finally {
+    inflightNotifications.delete(channelResourceId)
   }
 }
