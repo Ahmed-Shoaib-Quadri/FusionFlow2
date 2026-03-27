@@ -50,7 +50,10 @@ export function parseWorkflowEdges(edges?: string | null): WorkflowEdge[] {
 }
 
 export function getTriggerNode(nodes: EditorNode[]) {
-  return nodes.find((node) => node.type === 'Trigger') || null
+  return (
+    nodes.find((node) => node.type === 'Trigger' || node.type === 'Google Drive') ||
+    null
+  )
 }
 
 export function getTriggerMetadata(nodes: EditorNode[]): TriggerMetadata {
@@ -58,8 +61,12 @@ export function getTriggerMetadata(nodes: EditorNode[]): TriggerMetadata {
   const metadata = (triggerNode?.data.metadata || {}) as TriggerMetadata
 
   return {
-    triggerType: metadata.triggerType || DEFAULT_TRIGGER_TYPE,
-    isConfigured: metadata.isConfigured ?? false,
+    triggerType:
+      triggerNode?.type === 'Google Drive'
+        ? 'google_drive'
+        : metadata.triggerType || DEFAULT_TRIGGER_TYPE,
+    isConfigured:
+      triggerNode?.type === 'Google Drive' ? true : metadata.isConfigured ?? false,
     isEnabled: metadata.isEnabled ?? true,
     scheduleInterval: metadata.scheduleInterval || DEFAULT_SCHEDULE_INTERVAL,
     webhookSecret: metadata.webhookSecret || '',

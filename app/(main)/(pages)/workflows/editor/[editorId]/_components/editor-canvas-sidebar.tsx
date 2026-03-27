@@ -1,123 +1,193 @@
 'use client'
+import React, { useEffect, useMemo } from 'react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { Button } from '@/components/ui/button'
 import { useNodeConnections } from '@/app/providers/connections-provider'
 import { useEditor } from '@/app/providers/editor-provider'
-import { EditorCanvasTypes, EditorNodeType } from '@/lib/types'
-import React, { useEffect } from 'react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Separator } from '@/components/ui/separator'
+import { useAutoFlowStore } from '@/store'
 import { CONNECTIONS, EditorCanvasDefaultCardTypes } from '@/lib/constant'
-import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import EditorCanvasIconHelper from './editor-canvas-card-icon-helper'
+import { EditorCanvasTypes, EditorNodeType } from '@/lib/types'
 import { fetchBotSlackChannels, onConnections, onDragStart } from '@/lib/editor-utils'
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import EditorCanvasIconHelper from './editor-canvas-card-icon-helper'
 import RenderConnectionAccordion from './render-connection-accordion'
 import RenderOutputAccordion from './render-output-accordion'
-import { useAutoFlowStore } from '@/store'
 
 type Props = {
-    nodes: EditorNodeType[]
+  nodes: EditorNodeType[]
+  onAddNode: (type: EditorCanvasTypes) => void
+  onArrangeHierarchy: () => void
 }
 
-const EditorCanvasSidebar = ({ nodes }: Props) => {
-    const { state } = useEditor();
-    const { nodeConnection } = useNodeConnections();
-    const { googleFile, setSlackChannels } = useAutoFlowStore();
-    useEffect(() => {
-        if(state) {
-            onConnections(nodeConnection, state, googleFile);
-        }
-    }, [state]);
+const EditorCanvasSidebar = ({
+  nodes,
+  onAddNode,
+  onArrangeHierarchy,
+}: Props) => {
+  const { state } = useEditor()
+  const { nodeConnection } = useNodeConnections()
+  const { googleFile, setSlackChannels } = useAutoFlowStore()
 
-    useEffect(() => {
-        if(nodeConnection.slackNode.slackAccessToken) {
-            fetchBotSlackChannels(
-                nodeConnection.slackNode.slackAccessToken,
-                setSlackChannels
-            );
-        }
-    }, [nodeConnection]);
+  useEffect(() => {
+    if (state) {
+      onConnections(nodeConnection, state, googleFile)
+    }
+  }, [googleFile, nodeConnection, state])
+
+  useEffect(() => {
+    if (nodeConnection.slackNode.slackAccessToken) {
+      fetchBotSlackChannels(nodeConnection.slackNode.slackAccessToken, setSlackChannels)
+    }
+  }, [nodeConnection.slackNode.slackAccessToken, setSlackChannels])
+
+  const starterCards = useMemo(
+    () => ['Google Drive', 'Trigger'] as EditorCanvasTypes[],
+    []
+  )
+
+  const actionCards = useMemo(
+    () =>
+      (
+        [
+          'Action',
+          'Condition',
+          'Wait',
+          'Slack',
+          'Discord',
+          'Notion',
+          'Custom Webhook',
+          'Email',
+          'AI',
+          'Google Calender',
+        ] as EditorCanvasTypes[]
+      ).filter((type) => EditorCanvasDefaultCardTypes[type]),
+    []
+  )
 
   return (
-    <aside>
-        <Tabs
-         defaultValue='actions'
-         className='h-screen overflow-scroll pb-24'
-        >
-            <TabsList className='bg-transparent '>
-                <TabsTrigger value="actions" className='cursor-pointer'>Actions</TabsTrigger>
-                <TabsTrigger value="settings" className='cursor-pointer'>Settings</TabsTrigger>
-            </TabsList>
-            <Separator />
-            <TabsContent
-             value="actions"
-             className='flex flex-col gap-4 p-4'
-            >
-                {Object.entries(EditorCanvasDefaultCardTypes)
-                .filter(
-                    ([cardKey, cardType])=>
-                    (!nodes.length && cardType.type === 'Trigger' && cardKey === 'Trigger') || 
-                    (nodes.length && cardType.type === 'Action')
-                )
-                .map(([cardKey, cardValue])=> (
-                    <Card
-                     key={cardKey}
-                     draggable
-                     className='w-full cursor-grab border-black bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900'
-                     onDragStart={(event) => 
-                        onDragStart(event, cardKey as EditorCanvasTypes)
-                     }
-                    >
-                        <CardHeader className='flex flex-row items-center gap-4 p-4'>
-                            <EditorCanvasIconHelper type={cardKey as EditorCanvasTypes} />
-                            <CardTitle className='text-md'>
-                                {cardKey}
-                                <CardDescription>{cardValue.description}</CardDescription>
-                            </CardTitle>
-                        </CardHeader>
-                    </Card>
-                ))}
-            </TabsContent>
-            <TabsContent
-             value="settings"
-             className='-mt-6'
-            >
-                <div className='px-2 py-4 text-center text-xl font-bold'>
-                    {state.editor.selectedNode.data.title}
-                </div>
+    <aside className="h-full border-l bg-background/70 backdrop-blur-sm">
+      <Tabs defaultValue="palette" className="h-full overflow-y-auto pb-24">
+        <div className="sticky top-0 z-10 bg-background/95 px-4 pb-3 pt-4 backdrop-blur-sm">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="palette" className="cursor-pointer">
+              Palette
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="cursor-pointer">
+              Inspector
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-                <Accordion type='multiple'>
-                    <AccordionItem
-                     value="Options"
-                     className='border-y-[1px] px-2'
+        <TabsContent value="palette" className="space-y-6 p-4">
+          <div className="rounded-xl border bg-muted/30 p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Starter node
+            </h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Begin the workflow with either a dedicated Google Drive starter or the flexible
+              Trigger node.
+            </p>
+            <div className="mt-4 grid gap-3">
+              {starterCards.map((cardKey) => {
+                const cardValue = EditorCanvasDefaultCardTypes[cardKey]
+                return (
+                  <Card
+                    key={cardKey}
+                    draggable={!nodes.length}
+                    onDragStart={(event) => onDragStart(event, cardKey)}
+                    className="cursor-pointer border-black bg-neutral-100 transition-colors hover:bg-neutral-200 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+                    onClick={() => {
+                      if (!nodes.length) onAddNode(cardKey)
+                    }}
+                  >
+                    <CardHeader className="flex flex-row items-center gap-4 p-4">
+                      <EditorCanvasIconHelper type={cardKey} />
+                      <CardTitle className="text-md">
+                        {cardKey}
+                        <CardDescription>{cardValue.description}</CardDescription>
+                      </CardTitle>
+                    </CardHeader>
+                  </Card>
+                )
+              })}
+            </div>
+          </div>
+
+          {nodes.length > 0 ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Node palette
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Drag nodes onto the canvas or click to insert them beneath the selected node.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={onArrangeHierarchy}>
+                  Arrange
+                </Button>
+              </div>
+
+              <div className="grid gap-3">
+                {actionCards.map((cardKey) => {
+                  const cardValue = EditorCanvasDefaultCardTypes[cardKey]
+                  return (
+                    <Card
+                      key={cardKey}
+                      draggable
+                      className="cursor-grab border-black bg-neutral-100 transition-colors hover:bg-neutral-200 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+                      onDragStart={(event) => onDragStart(event, cardKey)}
+                      onClick={() => onAddNode(cardKey)}
                     >
-                        <AccordionTrigger className='!no-underline'>
-                            Account
-                        </AccordionTrigger>
-                        <AccordionContent>
-                            {CONNECTIONS.map((connection) => (
-                                <RenderConnectionAccordion
-                                 key={connection.title}
-                                 state={state}
-                                 connection={connection}
-                                />
-                            ))}{' '}
-                        </AccordionContent>
-                    </AccordionItem>
-                    <AccordionItem
-                     value="Expected Output"
-                     className='px-2'
-                    >
-                        <AccordionTrigger className='!no-underline'>
-                            Action
-                        </AccordionTrigger>
-                        <RenderOutputAccordion
-                         state={state}
-                         nodeConnection={nodeConnection}
-                        ></RenderOutputAccordion>
-                    </AccordionItem>
-                </Accordion>
-            </TabsContent>
-        </Tabs>
+                      <CardHeader className="flex flex-row items-center gap-4 p-4">
+                        <EditorCanvasIconHelper type={cardKey} />
+                        <CardTitle className="text-md">
+                          {cardKey}
+                          <CardDescription>{cardValue.description}</CardDescription>
+                        </CardTitle>
+                      </CardHeader>
+                    </Card>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="settings" className="-mt-2 p-4">
+          <div className="mb-4 rounded-xl border bg-muted/20 p-4">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Selected node
+            </div>
+            <div className="mt-2 text-lg font-semibold">
+              {state.editor.selectedNode.data.title || 'Nothing selected'}
+            </div>
+          </div>
+
+          <Accordion type="multiple">
+            <AccordionItem value="Options" className="border-y-[1px] px-2">
+              <AccordionTrigger className="!no-underline">Connections</AccordionTrigger>
+              <AccordionContent>
+                {CONNECTIONS.map((connection) => (
+                  <RenderConnectionAccordion
+                    key={connection.title}
+                    state={state}
+                    connection={connection}
+                  />
+                ))}
+              </AccordionContent>
+            </AccordionItem>
+
+            <AccordionItem value="Expected Output" className="px-2">
+              <AccordionTrigger className="!no-underline">Node settings</AccordionTrigger>
+              <RenderOutputAccordion state={state} nodeConnection={nodeConnection} />
+            </AccordionItem>
+          </Accordion>
+        </TabsContent>
+      </Tabs>
     </aside>
   )
 }
