@@ -1,6 +1,7 @@
 'use client'
 import React, { useEffect, useMemo } from 'react'
 import axios from 'axios'
+import { usePathname } from 'next/navigation'
 import { AccordionContent } from '@/components/ui/accordion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -17,7 +18,7 @@ import { onCreateNewPageInDatabase } from '@/app/(main)/(pages)/connections/_act
 import { postMessageToSlack } from '@/app/(main)/(pages)/connections/_actions/slack-connection'
 import { useAutoFlowStore } from '@/store'
 import { EditorCanvasTypes, WorkflowComparisonOperator, WorkflowNodeMetadata } from '@/lib/types'
-import { onContentChange } from '@/lib/editor-utils'
+import { onCreateNodeTemplate } from '../../../_actions/workflow-connections'
 
 export interface Option {
   value: string
@@ -54,9 +55,11 @@ const ContentBasedOnTitle = ({
   setSelectedSlackChannels,
 }: Props) => {
   const { dispatch } = useEditor()
+  const pathname = usePathname()
   const title = newState.editor.selectedNode.data.title as EditorCanvasTypes
   const metadata = (newState.editor.selectedNode.data.metadata || {}) as WorkflowNodeMetadata
   const { slackChannels } = useAutoFlowStore()
+  const workflowId = pathname.split('/').pop() || ''
 
   useEffect(() => {
     const reqGoogle = async () => {
@@ -152,9 +155,8 @@ const ContentBasedOnTitle = ({
               <Label>Discord message</Label>
               <Input
                 type="text"
-                value={nodeConnection.discordNode.content}
+                value={metadata.content || ''}
                 onChange={(event) => {
-                  onContentChange(nodeConnection, title, event)
                   updateMetadata({ content: event.target.value })
                 }}
               />
@@ -164,7 +166,7 @@ const ContentBasedOnTitle = ({
                 variant="outline"
                 onClick={async () => {
                   const result = await postContentToWebHook(
-                    nodeConnection.discordNode.content,
+                    metadata.content || '',
                     nodeConnection.discordNode.webhookURL
                   )
                   if (result.message === 'success') {
@@ -175,6 +177,19 @@ const ContentBasedOnTitle = ({
                 }}
               >
                 Test message
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  const response = await onCreateNodeTemplate(
+                    metadata.content || '',
+                    'Discord',
+                    workflowId
+                  )
+                  toast.message(response)
+                }}
+              >
+                Save template
               </Button>
             </div>
           </>
@@ -187,9 +202,8 @@ const ContentBasedOnTitle = ({
               <Label>Slack message</Label>
               <Input
                 type="text"
-                value={nodeConnection.slackNode.content}
+                value={metadata.content || ''}
                 onChange={(event) => {
-                  onContentChange(nodeConnection, title, event)
                   updateMetadata({ content: event.target.value })
                 }}
               />
@@ -233,7 +247,7 @@ const ContentBasedOnTitle = ({
                   const response = await postMessageToSlack(
                     nodeConnection.slackNode.slackAccessToken,
                     selectedSlackChannels,
-                    nodeConnection.slackNode.content
+                    metadata.content || ''
                   )
                   if (response.message === 'Success') {
                     toast.success('Slack test message sent')
@@ -243,6 +257,21 @@ const ContentBasedOnTitle = ({
                 }}
               >
                 Test message
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  const response = await onCreateNodeTemplate(
+                    metadata.content || '',
+                    'Slack',
+                    workflowId,
+                    selectedSlackChannels,
+                    nodeConnection.slackNode.slackAccessToken
+                  )
+                  toast.message(response)
+                }}
+              >
+                Save template
               </Button>
             </div>
           </>
@@ -254,7 +283,13 @@ const ContentBasedOnTitle = ({
             {renderBasicTextArea(
               'Notion page content',
               metadata.notionContent || '',
-              (value) => updateMetadata({ notionContent: value }),
+              (value) => {
+                updateMetadata({ notionContent: value })
+                nodeConnection.setNotionNode((prev: any) => ({
+                  ...prev,
+                  content: value,
+                }))
+              },
               'Text or template for the created Notion page'
             )}
             <div className="flex gap-2">
@@ -274,6 +309,22 @@ const ContentBasedOnTitle = ({
                 }}
               >
                 Test page
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  const response = await onCreateNodeTemplate(
+                    metadata.notionContent || '',
+                    'Notion',
+                    workflowId,
+                    [],
+                    nodeConnection.notionNode.accessToken,
+                    nodeConnection.notionNode.databaseId
+                  )
+                  toast.message(response)
+                }}
+              >
+                Save template
               </Button>
             </div>
           </>

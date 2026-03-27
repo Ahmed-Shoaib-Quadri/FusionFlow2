@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -29,9 +29,12 @@ const EditorCanvasSidebar = ({
   const { state } = useEditor()
   const { nodeConnection } = useNodeConnections()
   const { googleFile, setSlackChannels } = useAutoFlowStore()
+  const lastHydratedNodeId = useRef<string>('')
 
   useEffect(() => {
-    if (state) {
+    const selectedNodeId = state.editor.selectedNode.id
+    if (state && selectedNodeId && lastHydratedNodeId.current !== selectedNodeId) {
+      lastHydratedNodeId.current = selectedNodeId
       onConnections(nodeConnection, state, googleFile)
     }
   }, [googleFile, nodeConnection, state])
@@ -67,8 +70,8 @@ const EditorCanvasSidebar = ({
   )
 
   return (
-    <aside className="h-full border-l bg-background/70 backdrop-blur-sm">
-      <Tabs defaultValue="palette" className="h-full overflow-y-auto pb-24">
+    <aside className="h-full overflow-hidden border-l bg-background/70 backdrop-blur-sm">
+      <Tabs defaultValue="palette" className="flex h-full flex-col overflow-hidden">
         <div className="sticky top-0 z-10 bg-background/95 px-4 pb-3 pt-4 backdrop-blur-sm">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="palette" className="cursor-pointer">
@@ -80,7 +83,10 @@ const EditorCanvasSidebar = ({
           </TabsList>
         </div>
 
-        <TabsContent value="palette" className="space-y-6 p-4">
+        <TabsContent
+          value="palette"
+          className="mt-0 flex-1 overflow-y-auto space-y-6 p-4 pb-24"
+        >
           <div className="rounded-xl border bg-muted/30 p-4">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Starter node
@@ -157,7 +163,10 @@ const EditorCanvasSidebar = ({
           ) : null}
         </TabsContent>
 
-        <TabsContent value="settings" className="-mt-2 p-4">
+        <TabsContent
+          value="settings"
+          className="mt-0 flex-1 overflow-y-auto p-4 pb-24"
+        >
           <div className="mb-4 rounded-xl border bg-muted/20 p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Selected node
