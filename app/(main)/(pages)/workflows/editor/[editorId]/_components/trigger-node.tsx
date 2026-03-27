@@ -6,10 +6,16 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import {
+  DEFAULT_DRIVE_EVENT_TYPES,
   DEFAULT_SCHEDULE_INTERVAL,
   DEFAULT_TRIGGER_TYPE,
 } from '@/lib/workflow-definition'
-import { EditorCanvasTypes, TriggerMetadata, WorkflowTriggerType } from '@/lib/types'
+import {
+  DriveChangeEventType,
+  EditorCanvasTypes,
+  TriggerMetadata,
+  WorkflowTriggerType,
+} from '@/lib/types'
 import { CalendarClock, Link2, MousePointerClickIcon, PlayCircle, Trash2 } from 'lucide-react'
 import CustomHandle from './custom-handle'
 
@@ -56,6 +62,15 @@ const triggerTypes: Array<{
   },
 ]
 
+const driveEventOptions: Array<{
+  value: DriveChangeEventType
+  label: string
+}> = [
+  { value: 'created', label: 'Uploads' },
+  { value: 'updated', label: 'Updates' },
+  { value: 'deleted', label: 'Deletes' },
+]
+
 const TriggerNode = ({ data }: TriggerNodeProps) => {
   const nodeId = useNodeId()
   const { deleteElements } = useReactFlow()
@@ -67,6 +82,9 @@ const TriggerNode = ({ data }: TriggerNodeProps) => {
     NonNullable<TriggerMetadata['scheduleInterval']>
   >(DEFAULT_SCHEDULE_INTERVAL)
   const [webhookSecret, setWebhookSecret] = useState('')
+  const [driveEventTypes, setDriveEventTypes] = useState<DriveChangeEventType[]>(
+    DEFAULT_DRIVE_EVENT_TYPES
+  )
 
   const currentNode = useMemo(
     () => state.editor.elements.find((node) => node.id === nodeId),
@@ -88,6 +106,7 @@ const TriggerNode = ({ data }: TriggerNodeProps) => {
       isConfigured,
       scheduleInterval,
       webhookSecret,
+      driveEventTypes,
       ...partial,
     }
 
@@ -163,7 +182,30 @@ const TriggerNode = ({ data }: TriggerNodeProps) => {
     setIsConfigured(metadata.isConfigured ?? false)
     setScheduleInterval(metadata.scheduleInterval || DEFAULT_SCHEDULE_INTERVAL)
     setWebhookSecret(metadata.webhookSecret || '')
+    setDriveEventTypes(
+      metadata.driveEventTypes && metadata.driveEventTypes.length > 0
+        ? metadata.driveEventTypes
+        : DEFAULT_DRIVE_EVENT_TYPES
+    )
   }, [data.metadata])
+
+  const toggleDriveEventType = (eventType: DriveChangeEventType) => {
+    const isSelected = driveEventTypes.includes(eventType)
+    const nextEventTypes = isSelected
+      ? driveEventTypes.filter((item) => item !== eventType)
+      : [...driveEventTypes, eventType]
+
+    const resolvedEventTypes =
+      nextEventTypes.length > 0 ? nextEventTypes : DEFAULT_DRIVE_EVENT_TYPES
+
+    setDriveEventTypes(resolvedEventTypes)
+    setIsConfigured(true)
+    persistMetadata({
+      triggerType: 'google_drive',
+      driveEventTypes: resolvedEventTypes,
+      isConfigured: true,
+    })
+  }
 
   return (
     <>
@@ -263,6 +305,33 @@ const TriggerNode = ({ data }: TriggerNodeProps) => {
                 </Button>
               ))}
             </div>
+          </div>
+        )}
+
+        {triggerType === 'google_drive' && (
+          <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Drive events
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {driveEventOptions.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  size="sm"
+                  variant={driveEventTypes.includes(option.value) ? 'default' : 'outline'}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    toggleDriveEventType(option.value)
+                  }}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              The workflow will only run when the selected Drive change types are detected.
+            </p>
           </div>
         )}
 

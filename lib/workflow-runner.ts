@@ -27,7 +27,7 @@ import {
 
 type RunnerResult = {
   workflowId: string
-  status: 'completed' | 'failed' | 'skipped'
+  status: 'completed' | 'failed' | 'partial' | 'skipped'
   results?: NodeExecutionResult[]
   error?: string
   reason?: string
@@ -323,7 +323,15 @@ const executeNode = async (
         label: channel,
         value: channel,
       }))
-      const slackAccessToken = workflow.slackAccessToken
+      const slackConnection =
+        workflow.slackAccessToken
+          ? null
+          : await db.slack.findFirst({
+              where: { userId: workflow.userId },
+              select: { slackAccessToken: true },
+            })
+      const slackAccessToken =
+        workflow.slackAccessToken || slackConnection?.slackAccessToken || ''
 
       if (!slackAccessToken || !content || !channels.length) {
         throw new Error('Slack node is missing token, channels, or message content')
@@ -337,18 +345,28 @@ const executeNode = async (
     }
 
     case 'Notion': {
+      const notionConnection =
+        workflow.notionAccessToken && workflow.notionDbId
+          ? null
+          : await db.notion.findFirst({
+              where: { userId: workflow.userId },
+              select: { accessToken: true, databaseId: true },
+            })
+      const notionAccessToken =
+        workflow.notionAccessToken || notionConnection?.accessToken || ''
+      const notionDatabaseId = workflow.notionDbId || notionConnection?.databaseId || ''
       const content = resolveTemplate(
         metadata.notionContent || metadata.content || workflow.notionTemplate || '',
         context
       )
 
-      if (!workflow.notionAccessToken || !workflow.notionDbId || !content) {
+      if (!notionAccessToken || !notionDatabaseId || !content) {
         throw new Error('Notion node is missing database configuration or content')
       }
 
       await onCreateNewPageInDatabase(
-        workflow.notionDbId,
-        workflow.notionAccessToken,
+        notionDatabaseId,
+        notionAccessToken,
         content
       )
 
@@ -462,7 +480,7 @@ const followWorkflowGraph = async (
     ),
   ]
   const results: NodeExecutionResult[] = []
-  let overallStatus: 'success' | 'failed' | 'partial' = 'success'
+  let overallStatus: 'success' | 'partial' = 'success'
 
   while (pendingNodeIds.length > 0) {
     const nodeId = pendingNodeIds.shift()!
@@ -538,9 +556,12 @@ const followWorkflowGraph = async (
             startedAt,
           })
 
+          const resultStatus: RunnerResult['status'] =
+            overallStatus === 'partial' ? 'partial' : 'completed'
+
           return {
             workflowId: workflow.id,
-            status: 'completed' as const,
+            status: resultStatus,
             results,
           }
         }
@@ -580,9 +601,12 @@ const followWorkflowGraph = async (
     startedAt,
   })
 
+  const finalStatus: RunnerResult['status'] =
+    overallStatus === 'partial' ? 'partial' : 'completed'
+
   return {
     workflowId: workflow.id,
-    status: 'completed' as const,
+    status: finalStatus,
     results,
   }
 }

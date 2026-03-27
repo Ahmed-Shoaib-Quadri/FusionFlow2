@@ -1,4 +1,9 @@
-import { EditorNode, TriggerMetadata, WorkflowTriggerType } from './types'
+import {
+  DriveChangeEventType,
+  EditorNode,
+  TriggerMetadata,
+  WorkflowTriggerType,
+} from './types'
 
 export type WorkflowEdge = {
   id: string
@@ -10,6 +15,11 @@ export type WorkflowEdge = {
 
 export const DEFAULT_TRIGGER_TYPE: WorkflowTriggerType = 'google_drive'
 export const DEFAULT_SCHEDULE_INTERVAL: NonNullable<TriggerMetadata['scheduleInterval']> = '1h'
+export const DEFAULT_DRIVE_EVENT_TYPES: DriveChangeEventType[] = [
+  'created',
+  'updated',
+  'deleted',
+]
 
 export const EMPTY_EDITOR_NODE: EditorNode = {
   data: {
@@ -70,7 +80,15 @@ export function getTriggerMetadata(nodes: EditorNode[]): TriggerMetadata {
     isEnabled: metadata.isEnabled ?? true,
     scheduleInterval: metadata.scheduleInterval || DEFAULT_SCHEDULE_INTERVAL,
     webhookSecret: metadata.webhookSecret || '',
+    driveEventTypes:
+      metadata.driveEventTypes && metadata.driveEventTypes.length > 0
+        ? metadata.driveEventTypes
+        : DEFAULT_DRIVE_EVENT_TYPES,
   }
+}
+
+export function getDriveTriggerEventTypes(nodes: EditorNode[]) {
+  return getTriggerMetadata(nodes).driveEventTypes || DEFAULT_DRIVE_EVENT_TYPES
 }
 
 export function buildWorkflowPath(nodes: EditorNode[], edges: WorkflowEdge[]) {

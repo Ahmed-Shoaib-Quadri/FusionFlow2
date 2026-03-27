@@ -43,6 +43,11 @@ export type WorkflowTriggerType =
  | 'scheduled'
  | 'webhook'
 
+export type DriveChangeEventType =
+ | 'created'
+ | 'updated'
+ | 'deleted'
+
 export type TriggerMetadata = {
     triggerType?: WorkflowTriggerType
     isConfigured?: boolean
@@ -50,6 +55,7 @@ export type TriggerMetadata = {
     scheduleInterval?: '5m' | '15m' | '30m' | '1h' | '24h'
     webhookSecret?: string
     scheduledJobId?: string
+    driveEventTypes?: DriveChangeEventType[]
 }
 
 export type WorkflowComparisonOperator =

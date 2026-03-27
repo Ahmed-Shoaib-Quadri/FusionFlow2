@@ -1,14 +1,120 @@
 import { headers } from 'next/headers'
 import { db } from '@/lib/db'
 import { executeWorkflow } from '@/lib/workflow-runner'
-import { getTriggerMetadata, parseWorkflowNodes } from '@/lib/workflow-definition'
+import {
+  DEFAULT_DRIVE_EVENT_TYPES,
+  getDriveTriggerEventTypes,
+  getTriggerMetadata,
+  parseWorkflowNodes,
+} from '@/lib/workflow-definition'
+import { clerkClient } from '@clerk/nextjs/server'
+import { google } from 'googleapis'
+
+type DriveChangeRecord = {
+  removed?: boolean | null
+  fileId?: string | null
+  file?: {
+    name?: string | null
+    trashed?: boolean | null
+    createdTime?: string | null
+    modifiedTime?: string | null
+  } | null
+}
+
+const classifyDriveChange = (change: DriveChangeRecord) => {
+  if (change.removed || change.file?.trashed) {
+    return 'deleted' as const
+  }
+
+  const createdTime = change.file?.createdTime
+  const modifiedTime = change.file?.modifiedTime
+
+  if (createdTime && modifiedTime) {
+    const createdAt = new Date(createdTime).getTime()
+    const modifiedAt = new Date(modifiedTime).getTime()
+    if (Number.isFinite(createdAt) && Number.isFinite(modifiedAt) && Math.abs(modifiedAt - createdAt) < 15000) {
+      return 'created' as const
+    }
+  }
+
+  return 'updated' as const
+}
+
+const getGoogleDriveChanges = async (userId: string, pageToken: string) => {
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.OAUTH2_REDIRECT_URI
+  )
+
+  const client = await clerkClient()
+  const tokenResponse = await client.users.getUserOauthAccessToken(userId, 'google')
+  const accessToken = tokenResponse.data[0]?.token
+
+  if (!accessToken) {
+    throw new Error('Google OAuth token not found for user')
+  }
+
+  oauth2Client.setCredentials({
+    access_token: accessToken,
+  })
+
+  const drive = google.drive({
+    version: 'v3',
+    auth: oauth2Client,
+  })
+
+  const changes: DriveChangeRecord[] = []
+  let nextPageToken: string | undefined = pageToken
+  let newStartPageToken = pageToken
+
+  while (nextPageToken) {
+    try {
+      const response = await drive.changes.list({
+        pageToken: nextPageToken,
+        spaces: 'drive',
+        includeRemoved: true,
+        fields:
+          'nextPageToken,newStartPageToken,changes(fileId,removed,file(name,trashed,createdTime,modifiedTime))',
+      })
+
+      changes.push(...((response.data.changes as DriveChangeRecord[]) || []))
+      nextPageToken = response.data.nextPageToken || undefined
+      newStartPageToken = response.data.newStartPageToken || newStartPageToken
+
+      if (!response.data.nextPageToken) {
+        break
+      }
+    } catch (error: any) {
+      const status = error?.code || error?.response?.status
+      if (status === 410) {
+        const freshToken = await drive.changes.getStartPageToken({})
+        newStartPageToken = freshToken.data.startPageToken || pageToken
+        nextPageToken = undefined
+        break
+      }
+
+      throw error
+    }
+  }
+
+  return {
+    changes,
+    nextPageToken: newStartPageToken,
+  }
+}
 
 export async function POST() {
   const headersList = await headers()
   const channelResourceId = headersList.get('x-goog-resource-id')
+  const resourceState = headersList.get('x-goog-resource-state')
 
   if (!channelResourceId) {
     return Response.json({ message: 'No resource ID' }, { status: 400 })
+  }
+
+  if (resourceState === 'sync') {
+    return Response.json({ message: 'Drive listener synced' }, { status: 200 })
   }
 
   try {
@@ -16,7 +122,16 @@ export async function POST() {
       where: {
         googleResourceId: channelResourceId,
       },
-      select: { clerkId: true, credits: true },
+      select: {
+        id: true,
+        clerkId: true,
+        credits: true,
+        LocalGoogleCredential: {
+          select: {
+            pageToken: true,
+          },
+        },
+      },
     })
 
     if (!user) {
@@ -27,6 +142,30 @@ export async function POST() {
       return Response.json({ message: 'Insufficient credits' }, { status: 402 })
     }
 
+    const currentPageToken = user.LocalGoogleCredential?.pageToken
+    if (!currentPageToken) {
+      return Response.json({ message: 'Drive listener is missing its page token' }, { status: 409 })
+    }
+
+    const { changes, nextPageToken } = await getGoogleDriveChanges(user.clerkId, currentPageToken)
+
+    if (!changes.length) {
+      return Response.json({ message: 'No new Drive changes' }, { status: 200 })
+    }
+
+    await db.localGoogleCredential.updateMany({
+      where: {
+        userId: user.id,
+      },
+      data: {
+        pageToken: nextPageToken,
+      },
+    })
+
+    const detectedEventTypes = Array.from(
+      new Set(changes.map(classifyDriveChange))
+    )
+
     const workflows = await db.workflows.findMany({
       where: {
         userId: user.clerkId,
@@ -35,12 +174,27 @@ export async function POST() {
     })
 
     const googleDriveWorkflows = workflows.filter((workflow) => {
-      const triggerMetadata = getTriggerMetadata(parseWorkflowNodes(workflow.nodes))
-      return triggerMetadata.triggerType === 'google_drive'
+      const nodes = parseWorkflowNodes(workflow.nodes)
+      const triggerMetadata = getTriggerMetadata(nodes)
+      if (triggerMetadata.triggerType !== 'google_drive') {
+        return false
+      }
+
+      const requiredEventTypes = getDriveTriggerEventTypes(nodes)
+      const activeEventTypes =
+        requiredEventTypes.length > 0 ? requiredEventTypes : DEFAULT_DRIVE_EVENT_TYPES
+
+      return activeEventTypes.some((eventType) => detectedEventTypes.includes(eventType))
     })
 
     if (!googleDriveWorkflows.length) {
-      return Response.json({ message: 'No workflows to execute' }, { status: 200 })
+      return Response.json(
+        {
+          message: 'No workflows matched the detected Drive changes',
+          detectedEventTypes,
+        },
+        { status: 200 }
+      )
     }
 
     const executionResults = await Promise.all(
@@ -71,6 +225,7 @@ export async function POST() {
     return Response.json(
       {
         message: 'Workflows executed',
+        detectedEventTypes,
         results: executionResults,
       },
       { status: 200 }
