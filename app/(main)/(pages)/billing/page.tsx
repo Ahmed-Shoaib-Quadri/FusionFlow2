@@ -16,7 +16,6 @@ const Billing = async (props: Props) => {
     if(session_id) {
         const stripe = new Stripe(process.env.STRIPE_SECRET!, {
             typescript: true,
-            apiVersion: '2025-05-28.basil',
         })
 
         const session = await stripe.checkout.sessions.listLineItems(session_id);
