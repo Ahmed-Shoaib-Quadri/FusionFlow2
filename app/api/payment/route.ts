@@ -4,7 +4,6 @@ import Stripe from 'stripe'
 export async function GET(req: NextRequest) {
   const stripe = new Stripe(process.env.STRIPE_SECRET!, {
     typescript: true,
-    apiVersion: '2025-05-28.basil',
   })
 
   const products = await stripe.prices.list({
