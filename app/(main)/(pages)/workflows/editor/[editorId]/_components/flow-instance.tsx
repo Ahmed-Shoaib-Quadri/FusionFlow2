@@ -1,9 +1,8 @@
 'use client'
-import { useNodeConnections } from '@/app/providers/connections-provider'
 import { Button } from '@/components/ui/button'
 import { usePathname } from 'next/navigation'
 import React, { useCallback, useEffect, useState } from 'react'
-import { onCreateNodesEdges, onFlowPublish } from '../_actions/workflow-connections'
+import { onFlowPublish, onSaveWorkflow } from '../../../_actions/workflow-connections'
 import { toast } from 'sonner'
 
 type Props = {
@@ -15,33 +14,36 @@ type Props = {
 const FlowInstance = ({ children, edges, nodes }: Props) => {
     const pathname = usePathname();
     const [isFlow, setIsFlow] = useState([]);
-    const { nodeConnection } = useNodeConnections()
 
     const onFlowAutomation = useCallback(async () => {
-        const flow = await onCreateNodesEdges(
+        const flow = await onSaveWorkflow(
             pathname.split('/').pop()!,
-            JSON.stringify(nodes),
-            JSON.stringify(edges),
-            JSON.stringify(isFlow)
+            nodes,
+            edges
         )
 
-        if(flow) {
+        if(flow?.message === 'Workflow saved successfully') {
             toast.success('Workflow saved successfully');
         } else {
-            toast.error('Failed to save workflow');
+            toast.error(flow?.message || 'Failed to save workflow');
         }
-    },[nodeConnection, nodes, edges, isFlow]);
+    },[nodes, edges, pathname]);
 
     const onPublishWorkflow = useCallback(async () => {
         const response = await onFlowPublish(pathname.split('/').pop()!,true)
-        if(response) toast.message(response);
-    },[])
+        if(response === 'Workflow published') {
+          toast.success(response);
+          return
+        }
+
+        if(response) toast.error(response);
+    },[pathname])
 
     const onAutomateFlow = async () => {
       const flows: any = [];
       const connectedEdges = edges.map((edge) => edge.target)
-      connectedEdges.map((target) => {
-        nodes.map((node) => {
+      connectedEdges.forEach((target) => {
+        nodes.forEach((node) => {
           if(node.id === target) {
             flows.push(node.type)
           }
@@ -55,7 +57,7 @@ const FlowInstance = ({ children, edges, nodes }: Props) => {
     }, [edges])
 
   return (
-    <div className='flex flex-col gap-2'>
+    <div className='flex h-full min-h-0 flex-col gap-2'>
       <div className='flex gap-3 p-4'>
         <Button 
          onClick={onFlowAutomation} 
@@ -72,7 +74,9 @@ const FlowInstance = ({ children, edges, nodes }: Props) => {
             Publish
          </Button>
       </div>
-      {children}
+      <div className='min-h-0 flex-1 overflow-hidden'>
+        {children}
+      </div>
     </div>
   )
 }

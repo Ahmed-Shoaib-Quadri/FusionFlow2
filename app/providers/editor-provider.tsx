@@ -1,6 +1,7 @@
 'use client'
 
 import { EditorActions, EditorNodeType } from '@/lib/types';
+import { EMPTY_EDITOR_NODE } from '@/lib/workflow-definition';
 import {
     Dispatch,
     createContext,
@@ -33,19 +34,7 @@ export type EditorState = {
 
 const initialEditorState: EditorState['editor'] = {
     elements: [],
-    selectedNode: {
-        data: {
-            completed: false,
-            current : false,
-            description: '',
-            metadata: {},
-            title: '',
-            type: 'Trigger',
-        },
-        id: '',
-        position: {x: 0, y: 0},
-        type: 'Trigger',
-    },
+    selectedNode: EMPTY_EDITOR_NODE,
     edges: [],
 }
 
@@ -118,6 +107,13 @@ const editorReducer = (
             }
 
         case 'UPDATE_NODE':
+            const updatedSelectedNode =
+                state.editor.selectedNode.id === action.payload.nodeId
+                    ? {
+                          ...state.editor.selectedNode,
+                          data: action.payload.data,
+                      }
+                    : state.editor.selectedNode
             return {
                 ...state,
                 editor: {
@@ -127,6 +123,27 @@ const editorReducer = (
                             ? { ...element, data: action.payload.data }
                             : element
                     ),
+                    selectedNode: updatedSelectedNode,
+                },
+            }
+
+        case 'DELETE_NODE':
+            return {
+                ...state,
+                editor: {
+                    ...state.editor,
+                    elements: state.editor.elements.filter(
+                        (element) => element.id !== action.payload.nodeId
+                    ),
+                    edges: state.editor.edges.filter(
+                        (edge) =>
+                            edge.source !== action.payload.nodeId &&
+                            edge.target !== action.payload.nodeId
+                    ),
+                    selectedNode:
+                        state.editor.selectedNode.id === action.payload.nodeId
+                            ? EMPTY_EDITOR_NODE
+                            : state.editor.selectedNode,
                 },
             }
         

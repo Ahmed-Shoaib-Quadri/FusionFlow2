@@ -6,22 +6,68 @@ import { getGoogleListener } from '../../../_actions/workflow-connections';
 import { Card, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CardContainer } from '@/app/components/global/3d-card';
+import { useEditor } from '@/app/providers/editor-provider';
+import { DEFAULT_DRIVE_EVENT_TYPES } from '@/lib/workflow-definition';
+import { DriveChangeEventType } from '@/lib/types';
 
 type Props = {}
+
+const driveEventOptions: Array<{
+  value: DriveChangeEventType
+  label: string
+}> = [
+  { value: 'created', label: 'Uploads / created files' },
+  { value: 'updated', label: 'Updates / edits' },
+  { value: 'deleted', label: 'Deletes / trashed files' },
+]
 
 const GoogleDriveFiles = () => {
     const [loading, setLoading] = useState(false);
     const [isListening, setIsListening] = useState(false);
+    const { dispatch, state } = useEditor()
+    const selectedNode = state.editor.selectedNode
+    const metadata = selectedNode.data.metadata || {}
+    const selectedEventTypes = metadata.driveEventTypes?.length
+      ? metadata.driveEventTypes
+      : DEFAULT_DRIVE_EVENT_TYPES
+
+    const updateDriveFilters = (eventType: DriveChangeEventType) => {
+        if (!selectedNode.id) return
+
+        const isSelected = selectedEventTypes.includes(eventType)
+        const nextEventTypes = isSelected
+          ? selectedEventTypes.filter((item: DriveChangeEventType) => item !== eventType)
+          : [...selectedEventTypes, eventType]
+
+        dispatch({
+          type: 'UPDATE_NODE',
+          payload: {
+            nodeId: selectedNode.id,
+            data: {
+              ...selectedNode.data,
+              metadata: {
+                ...metadata,
+                triggerType: 'google_drive',
+                isConfigured: true,
+                isEnabled: metadata.isEnabled ?? true,
+                driveEventTypes: nextEventTypes.length > 0 ? nextEventTypes : DEFAULT_DRIVE_EVENT_TYPES,
+              },
+            },
+          },
+        })
+    }
 
     const reqGoogle = async () => {
         setLoading(true)
-        const response = await axios.get('/api/drive-activity')
-        if (response) {
-            toast.message(response.data)
-            setLoading(false)
-            setIsListening(true)
+        try {
+          const response = await axios.get('/api/drive-activity')
+          if (response) {
+              toast.message(typeof response.data === 'string' ? response.data : 'Listener created')
+              setIsListening(true)
+          }
+        } finally {
+          setLoading(false)
         }
-        setIsListening(false);   
     }
 
     const onListener = async () => {
@@ -36,6 +82,29 @@ const GoogleDriveFiles = () => {
     }, [])
   return (
     <div className='flex flex-col gap-3 pb-6'>
+        <Card className="py-3">
+          <CardContainer>
+            <div className="flex flex-col gap-3 px-4">
+              <CardDescription>Select which Drive events should trigger this workflow</CardDescription>
+              <div className="flex flex-wrap gap-2">
+                {driveEventOptions.map((option) => {
+                  const active = selectedEventTypes.includes(option.value)
+                  return (
+                    <Button
+                      key={option.value}
+                      type="button"
+                      size="sm"
+                      variant={active ? 'default' : 'outline'}
+                      onClick={() => updateDriveFilters(option.value)}
+                    >
+                      {option.label}
+                    </Button>
+                  )
+                })}
+              </div>
+            </div>
+          </CardContainer>
+        </Card>
         {isListening ? (
         <Card className="py-3">
           <CardContainer>

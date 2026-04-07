@@ -2,16 +2,18 @@ import { db } from '@/lib/db'
 
 export type ExecutionResult = {
   node: string
-  status: 'success' | 'failed'
+  status: 'success' | 'failed' | 'scheduled' | 'skipped'
   reason?: string
   error?: string
+  output?: string
+  nodeId?: string
 }
 
 export type WorkflowExecutionData = {
   workflowId: string
   userId: string
   status: 'success' | 'failed' | 'partial'
-  triggerType: 'google_drive' | 'manual' | 'scheduled'
+  triggerType: 'google_drive' | 'manual' | 'scheduled' | 'webhook'
   results?: ExecutionResult[]
   error?: string
   startedAt?: Date

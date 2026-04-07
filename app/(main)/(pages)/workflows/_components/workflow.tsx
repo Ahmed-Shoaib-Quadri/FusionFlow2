@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Card,
     CardDescription,
@@ -18,21 +18,35 @@ import {
     DropdownMenuItem, 
     DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu';
-import { MoreVertical, Trash2, Copy, Edit, Play, Pause } from 'lucide-react';
+import { MoreVertical, Trash2, Copy, Edit } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { WorkflowTriggerType } from '@/lib/types';
 
 type Props = {
     name: string
     description: string
     id: string
     publish: boolean | null
+    nodes?: string | null
     createdAt?: Date
     updatedAt?: Date
 }
 
-const Workflow = ({ name, description, id, publish, createdAt, updatedAt }: Props) => {
+const Workflow = ({ name, description, id, publish, nodes, createdAt, updatedAt }: Props) => {
     const [enabled, setEnabled] = useState(!!publish);
     const [isLoading, setIsLoading] = useState(false);
+
+    const triggerType = useMemo<WorkflowTriggerType>(() => {
+        if (!nodes) return 'google_drive';
+
+        try {
+            const parsedNodes = JSON.parse(nodes);
+            const triggerNode = parsedNodes.find((node: any) => node.type === 'Trigger');
+            return triggerNode?.data?.metadata?.triggerType || 'google_drive';
+        } catch (error) {
+            return 'google_drive';
+        }
+    }, [nodes]);
 
     useEffect(() => {
         setEnabled(!!publish);
@@ -111,6 +125,27 @@ const Workflow = ({ name, description, id, publish, createdAt, updatedAt }: Prop
         return 'Inactive';
     }
 
+    const handleManualRun = async () => {
+        setIsLoading(true);
+        try {
+            const response = await fetch(`/api/workflows/execute/${id}`, {
+                method: 'POST',
+            });
+            const payload = await response.json();
+
+            if (!response.ok) {
+                toast.error(payload?.error || payload?.message || 'Workflow execution failed');
+                return;
+            }
+
+            toast.success('Workflow executed successfully');
+        } catch (error) {
+            toast.error('Workflow execution failed');
+        } finally {
+            setIsLoading(false);
+        }
+    }
+
     return (
         <Card className='flex w-full items-center justify-between hover:shadow-md transition-shadow'>
             <CardHeader className='flex flex-col gap-4 flex-1'>
@@ -144,6 +179,9 @@ const Workflow = ({ name, description, id, publish, createdAt, updatedAt }: Prop
                         <div className='flex items-center gap-2 mt-2'>
                             <Badge variant={enabled ? "default" : "secondary"}>
                                 {getStatusText()}
+                            </Badge>
+                            <Badge variant="outline" className='capitalize'>
+                                {triggerType.replace('_', ' ')}
                             </Badge>
                             {updatedAt && (
                                 <span className='text-xs text-muted-foreground'>
@@ -207,6 +245,16 @@ const Workflow = ({ name, description, id, publish, createdAt, updatedAt }: Prop
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
+                {triggerType === 'manual' && enabled && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isLoading}
+                      onClick={handleManualRun}
+                    >
+                      Run now
+                    </Button>
+                )}
             </div>
         </Card>
     )

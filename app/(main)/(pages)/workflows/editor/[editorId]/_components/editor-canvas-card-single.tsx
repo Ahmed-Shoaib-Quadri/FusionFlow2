@@ -1,18 +1,18 @@
 import { useEditor } from '@/app/providers/editor-provider'
 import { EditorCanvasCardType } from '@/lib/types'
 import React, { useMemo } from 'react'
-import { Position, useNodeId } from 'reactflow'
+import { Position, useNodeId, useReactFlow } from 'reactflow'
 import EditorCanvasIconHelper from './editor-canvas-card-icon-helper'
 import CustomHandle from './custom-handle'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import clsx from 'clsx'
-
-type Props = {}
+import { Button } from '@/components/ui/button'
+import { Trash2 } from 'lucide-react'
 
 const EditorCanvasCardSingle = ({ data }: { data: EditorCanvasCardType}) => {
     const { dispatch, state } = useEditor();
     const nodeId = useNodeId()
+    const { deleteElements } = useReactFlow()
     const logo = useMemo(() => {
         return <EditorCanvasIconHelper type={data.type} />
     }, [data])
@@ -37,17 +37,39 @@ const EditorCanvasCardSingle = ({ data }: { data: EditorCanvasCardType}) => {
             },
            })
       }}
-      className='relative max-w-[400px] dark:border-muted-foreground/70'
+      className='relative max-w-[420px] dark:border-muted-foreground/70'
      >
-      <CardHeader className="flex flex-row items-center gap-4">
-        <div>{logo}</div>
-        <div>
-          <CardTitle className='text-md'>{data.title}</CardTitle>
+      <CardHeader className="flex flex-row items-start gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          {logo}
+        </div>
+        <div className='flex-1'>
+          <div className='flex items-start justify-between gap-3'>
+            <div>
+              <CardTitle className='text-md'>{data.title}</CardTitle>
+              <p className='text-xs text-muted-foreground/60'>
+                Node ID: {nodeId}
+              </p>
+            </div>
+            <Button
+             type="button"
+             variant="ghost"
+             size="icon"
+             className='h-8 w-8 text-muted-foreground'
+             onClick={async (event) => {
+               event.stopPropagation()
+               if (!nodeId) return
+               await deleteElements({ nodes: [{ id: nodeId }] })
+               dispatch({
+                 type: 'DELETE_NODE',
+                 payload: { nodeId },
+               })
+             }}
+            >
+              <Trash2 className='h-4 w-4' />
+            </Button>
+          </div>
           <CardDescription>
-            <p className='text-xs text-muted-foreground/50'>
-             <b className='text-muted-foreground/80'>ID: </b>
-             {nodeId}
-            </p>
             <p>{data.description}</p>
           </CardDescription>
         </div>
@@ -58,19 +80,29 @@ const EditorCanvasCardSingle = ({ data }: { data: EditorCanvasCardType}) => {
       >
         {data.type}
       </Badge>
-      <div
-       className={clsx('absolute left-3 top-4 h-2 w-2 rounded-full', {
-        'bg-green-500' : Math.random() < 0.6,
-        'bg-orange-500' : Math.random() >= 0.6 && Math.random() < 0.8,
-        'bg-red-500' : Math.random() >= 0.8
-       })}
-      ></div>
      </Card>
-     <CustomHandle 
-      type = "source"
-      position={Position.Bottom}
-      id="a"
-     />
+     {data.type === 'Condition' ? (
+      <>
+       <CustomHandle 
+        type = "source"
+        position={Position.Bottom}
+        id="condition-true"
+        style={{ left: '30%' }}
+       />
+       <CustomHandle 
+        type = "source"
+        position={Position.Bottom}
+        id="condition-false"
+        style={{ left: '70%' }}
+       />
+      </>
+     ) : (
+      <CustomHandle 
+       type = "source"
+       position={Position.Bottom}
+       id="default"
+      />
+     )}
     </>
   )
 }

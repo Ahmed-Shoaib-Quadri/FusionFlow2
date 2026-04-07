@@ -5,7 +5,7 @@ import { currentUser } from '@clerk/nextjs/server'
 import { onDiscordConnect } from './_actions/discord-connection'
 import { onNotionConnect } from './_actions/notion-connection'
 import { onSlackConnect } from './_actions/slack-connection'
-import { getUserData } from './_actions/get-user'
+import { db } from '@/lib/db'
 
 type Props = {
   searchParams?: { [key: string]: string | undefined }
@@ -86,19 +86,31 @@ const Connections = async (props: Props) => {
       user.id
     )
 
-    const connections: any = {}
+    const [discord, notion, slack, driveListener] = await Promise.all([
+      db.discordWebhook.findFirst({
+        where: { userId: user.id },
+        select: { id: true },
+      }),
+      db.notion.findFirst({
+        where: { userId: user.id },
+        select: { id: true },
+      }),
+      db.slack.findFirst({
+        where: { userId: user.id },
+        select: { id: true },
+      }),
+      db.user.findUnique({
+        where: { clerkId: user.id },
+        select: { googleResourceId: true },
+      }),
+    ])
 
-    const user_info = await getUserData(user.id)
-
-    //get user info with all connections
-    user_info?.connections.map((connection) => {
-      connections[connection.type] = true
-      return (connections[connection.type] = true)
-    })
-
-    // Google Drive connection will always be true
-    // as it is given access during the login process
-    return { ...connections, 'Google Drive': true }
+    return {
+      'Google Drive': Boolean(driveListener?.googleResourceId),
+      Discord: Boolean(discord),
+      Notion: Boolean(notion),
+      Slack: Boolean(slack),
+    }
   }
 
   const connections = await onUserConnections()

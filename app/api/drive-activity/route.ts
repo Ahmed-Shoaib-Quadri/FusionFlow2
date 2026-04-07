@@ -57,15 +57,50 @@ export async function GET() {
     })
 
     if(listener.status == 200) {
-        const channelStored = await db.user.updateMany({
+        const user = await db.user.findUnique({
+            where: {
+                clerkId: authUser.id,
+            },
+            select: {
+                id: true,
+                clerkId: true,
+            },
+        })
+
+        if (!user) {
+            return new NextResponse('User not found', { status: 404 })
+        }
+
+        await db.user.update({
             where: {
                 clerkId: authUser.id,
             },
             data: {
                 googleResourceId: listener.data.resourceId,
+                localGoogleId: channelId,
             },
         })
-        if(channelStored) {
+
+        await db.localGoogleCredential.upsert({
+            where: {
+                userId: user.id,
+            },
+            update: {
+                accessToken,
+                channelId,
+                pageToken: startPageToken,
+                subscribed: true,
+            },
+            create: {
+                userId: user.id,
+                accessToken,
+                channelId,
+                pageToken: startPageToken,
+                subscribed: true,
+            },
+        })
+
+        if(listener.data.resourceId) {
             return new NextResponse('Listening to changes...')
         }
     }

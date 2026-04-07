@@ -1,5 +1,6 @@
 'use client'
 import { useBilling } from '@/app/providers/billing-provider'
+import { onPaymentDetails } from '@/app/(main)/(pages)/billing/_actions/payment-connections'
 import axios from 'axios'
 import React, { useEffect, useState } from 'react'
 import { SubscriptionCard } from './subscription-card'
@@ -8,7 +9,7 @@ import CreditTracker from './credits-tracker'
 type Props = {} 
 
 const BillingDashboard = (props: Props) => {
-    const { credits, tier } = useBilling();
+    const { credits, tier, setCredits, setTier } = useBilling();
     const [stripeProducts, setStripeProducts] = useState<any>([]); 
     const [loading, setLoading] = useState<boolean>(false);
 
@@ -24,6 +25,24 @@ const BillingDashboard = (props: Props) => {
     useEffect(() => {
         onStripeProducts();
     },[]);
+
+    useEffect(() => {
+        let mounted = true
+
+        const syncBillingState = async () => {
+            const response = await onPaymentDetails()
+            if (!mounted || !response) return
+
+            setTier(response.tier || '')
+            setCredits(response.credits || '')
+        }
+
+        syncBillingState().catch(() => undefined)
+
+        return () => {
+            mounted = false
+        }
+    }, [setCredits, setTier])
 
     const onPayment = async (id: string) => {
         const { data } = await axios.post(
@@ -71,7 +90,7 @@ const BillingDashboard = (props: Props) => {
          </div>
          <CreditTracker
           tier ={tier}
-          credits ={parseInt(credits)}
+          credits ={Number.isNaN(parseInt(credits, 10)) ? 0 : parseInt(credits, 10)}
          />
         </>
       {/* )} */}

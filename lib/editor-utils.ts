@@ -1,7 +1,7 @@
 import { ConnectionProviderProps } from "@/app/providers/connections-provider";
 import { EditorCanvasCardType } from "./types";
 import { EditorState } from "@/app/providers/editor-provider";
-import { getNotionConnection, getNotionDatabase } from "@/app/(main)/(pages)/connections/_actions/notion-connection";
+import { getNotionConnection } from "@/app/(main)/(pages)/connections/_actions/notion-connection";
 import { getDiscordConnectionUrl } from "@/app/(main)/(pages)/connections/_actions/discord-connection";
 import { getSlackConnection, listBotChannels } from "@/app/(main)/(pages)/connections/_actions/slack-connection";
 import { Option } from "@/components/ui/multiple-selector";
@@ -87,10 +87,10 @@ export const onConnections = async (
 ) => {
   if (editorState.editor.selectedNode.data.title == 'Discord') {
     const connection = await getDiscordConnectionUrl()
-    if (connection) {
+    if (connection && !nodeConnection.discordNode.webhookURL) {
       nodeConnection.setDiscordNode({
         webhookURL: connection.url,
-        content: '',
+        content: nodeConnection.discordNode.content || '',
         webhookName: connection.name,
         guildName: connection.guildName,
       })
@@ -98,29 +98,18 @@ export const onConnections = async (
   }
   if (editorState.editor.selectedNode.data.title == 'Notion') {
     const connection = await getNotionConnection()
-    if (connection) {
+    if (connection && !nodeConnection.notionNode.accessToken) {
       nodeConnection.setNotionNode({
         accessToken: connection.accessToken,
         databaseId: connection.databaseId,
         workspaceName: connection.workspaceName,
-        content: {
-          name: googleFile.name,
-          kind: googleFile.kind,
-          type: googleFile.mimeType,
-        },
+        content: nodeConnection.notionNode.content || '',
       })
-
-      if (nodeConnection.notionNode.databaseId !== '') {
-        const response = await getNotionDatabase(
-          nodeConnection.notionNode.databaseId,
-          nodeConnection.notionNode.accessToken
-        )
-      }
     }
   }
   if (editorState.editor.selectedNode.data.title == 'Slack') {
     const connection = await getSlackConnection()
-    if (connection) {
+    if (connection && !nodeConnection.slackNode.slackAccessToken) {
       nodeConnection.setSlackNode({
         appId: connection.appId,
         authedUserId: connection.authedUserId,
@@ -130,7 +119,7 @@ export const onConnections = async (
         teamId: connection.teamId,
         teamName: connection.teamName,
         userId: connection.userId,
-        content: '',
+        content: nodeConnection.slackNode.content || '',
       })
     }
   }

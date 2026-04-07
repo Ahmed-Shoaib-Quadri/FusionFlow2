@@ -1,6 +1,6 @@
 'use client'
 import { useEditor } from '@/app/providers/editor-provider';
-import { EditorCanvasCardType, EditorNodeType } from '@/lib/types';
+import { EditorCanvasCardType, EditorNodeType, WorkflowNodeMetadata } from '@/lib/types';
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import ReactFlow, { addEdge, applyEdgeChanges, applyNodeChanges, Background, Connection, Controls, Edge, EdgeChange, MiniMap, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -14,12 +14,14 @@ import { EditorCanvasDefaultCardTypes } from '@/lib/constant';
 import FlowInstance from './flow-instance';
 import EditorCanvasSidebar from './editor-canvas-sidebar';
 import { onGetNodesEdges, onSaveWorkflow } from '../../../_actions/workflow-connections';
+import { EMPTY_EDITOR_NODE, WorkflowEdge, getOutgoingEdges, getTriggerNode } from '@/lib/workflow-definition';
+import { LayoutPanelTop } from 'lucide-react';
 
 type Props = {}
 
 const initialNodes: EditorNodeType[] = []
 
-const initialEdges: {id: string; source: string; target: string }[] = []
+const initialEdges: WorkflowEdge[] = []
 
 const EditorCanvas = () => {
     const { dispatch, state } = useEditor();
@@ -32,6 +34,149 @@ const EditorCanvas = () => {
     const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(true)
     const pathname = usePathname()
     const workflowId = pathname.split('/').pop()!
+    const hasStarterNode = nodes.some(
+      (node) => node.type === 'Trigger' || node.type === 'Google Drive'
+    )
+
+    const getDefaultNodePosition = useCallback(() => {
+      const selectedNode = nodes.find((node) => node.id === state.editor.selectedNode.id)
+
+      if (selectedNode) {
+        return {
+          x: selectedNode.position.x,
+          y: selectedNode.position.y + 220,
+        }
+      }
+
+      if (!nodes.length) {
+        return { x: 280, y: 80 }
+      }
+
+      const lastNode = nodes[nodes.length - 1]
+      return {
+        x: lastNode.position.x + (nodes.length % 2 === 0 ? 260 : -260),
+        y: lastNode.position.y + 180,
+      }
+    }, [nodes, state.editor.selectedNode.id])
+
+    const buildNode = useCallback(
+      (type: EditorCanvasCardType['type'], position: { x: number; y: number }) => ({
+        id: v4(),
+        type,
+        position,
+        data: {
+          title: type,
+          description: EditorCanvasDefaultCardTypes[type].description,
+          completed: false,
+          current: false,
+          metadata:
+            type === 'Google Drive'
+              ? {
+                  triggerType: 'google_drive',
+                  isConfigured: true,
+                  isEnabled: true,
+                } satisfies WorkflowNodeMetadata
+              : ({} as WorkflowNodeMetadata),
+          type,
+        },
+      }),
+      []
+    )
+
+    const addNodeOfType = useCallback(
+      (type: EditorCanvasCardType['type'], overridePosition?: { x: number; y: number }) => {
+        const triggerAlreadyExists = nodes.find(
+          (node) => node.type === 'Trigger' || node.type === 'Google Drive'
+        )
+
+        if ((type === 'Trigger' || type === 'Google Drive') && triggerAlreadyExists) {
+          toast('Choose either Trigger or Google Drive as the starter node')
+          return
+        }
+
+        if (
+          nodes.length > 0 &&
+          (type === 'Trigger' || type === 'Google Drive') &&
+          triggerAlreadyExists
+        ) {
+          return
+        }
+
+        const position = overridePosition || getDefaultNodePosition()
+        const newNode = buildNode(type, position)
+        setNodes((currentNodes) => currentNodes.concat(newNode))
+      },
+      [buildNode, getDefaultNodePosition, nodes]
+    )
+
+    const autoLayoutHierarchy = useCallback(() => {
+      const rootNode = getTriggerNode(nodes)
+      if (!rootNode) {
+        toast.message('Add a starter node before arranging the canvas')
+        return
+      }
+
+      const levels = new Map<string, number>()
+      const queue: Array<{ nodeId: string; level: number }> = [
+        { nodeId: rootNode.id, level: 0 },
+      ]
+
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        if (levels.has(current.nodeId)) continue
+        levels.set(current.nodeId, current.level)
+
+        getOutgoingEdges(edges, current.nodeId).forEach((edge) => {
+          queue.push({ nodeId: edge.target, level: current.level + 1 })
+        })
+      }
+
+      const groupedByLevel = new Map<number, string[]>()
+      levels.forEach((level, nodeId) => {
+        const group = groupedByLevel.get(level) || []
+        group.push(nodeId)
+        groupedByLevel.set(level, group)
+      })
+
+      const positionedNodeIds = new Set<string>()
+      const nextNodes = nodes.map((node) => {
+        const level = levels.get(node.id)
+        if (level === undefined) {
+          return node
+        }
+
+        const group = groupedByLevel.get(level) || []
+        const index = group.indexOf(node.id)
+        positionedNodeIds.add(node.id)
+
+        return {
+          ...node,
+          position: {
+            x: 120 + index * 320,
+            y: 80 + level * 200,
+          },
+        }
+      })
+
+      let orphanIndex = 0
+      setNodes(
+        nextNodes.map((node) => {
+          if (positionedNodeIds.has(node.id)) return node
+
+          const nextNode = {
+            ...node,
+            position: {
+              x: 120 + (orphanIndex % 3) * 320,
+              y: 120 + (Math.floor(orphanIndex / 3) + 4) * 180,
+            },
+          }
+          orphanIndex += 1
+          return nextNode
+        })
+      )
+
+      toast.success('Hierarchy arranged')
+    }, [edges, nodes])
 
     const onDragOver = useCallback((event:any) => {
       event.preventDefault();
@@ -71,60 +216,50 @@ const EditorCanvas = () => {
           return
         }
 
-        const triggerAlreadyExists = state.editor.elements.find(
-          (node) => node.type === 'Trigger'
-        )
-
-        if(type === 'Trigger' && triggerAlreadyExists){
-          toast('Only one trigger can be added to automation at the moment')
-          return
-        }
-        
         if(!reactFlowInstance) return 
         const position = reactFlowInstance.screenToFlowPosition({
           x: event.clientX,
           y: event.clientY,
         })
-
-        const newNode = {
-         id: v4(),
-         type,
-         position,
-         data: {
-          title: type,
-          description: EditorCanvasDefaultCardTypes[type].description,
-          completed: false,
-          current: false,
-          metadata: {},
-          type: type,
-         },
-        }
-
-        //@ts-ignore
-        setNodes((nds) => nds.concat(newNode))
-      },[reactFlowInstance, state]
+        addNodeOfType(type, position)
+      },[addNodeOfType, reactFlowInstance]
     )
 
     const handleClickCanvas = () => {
       dispatch({
         type: 'SELECTED_ELEMENT',
         payload: {
-          element: {
-            data: {
-              completed: false,
-              current: false,
-              description: '',
-              metadata: {},
-              title: '',
-              type: 'Trigger',
-            },
-            id: '',
-            position: { x: 0, y: 0},
-            type: 'Trigger',
-          },
+          element: EMPTY_EDITOR_NODE,
         },
       })
     }
+
+    const deleteNodeById = useCallback((nodeId: string) => {
+      if (!nodeId) return
+
+      setNodes((currentNodes) => currentNodes.filter((node) => node.id !== nodeId))
+      setEdges((currentEdges) =>
+        currentEdges.filter(
+          (edge) => edge.source !== nodeId && edge.target !== nodeId
+        )
+      )
+
+      dispatch({
+        type: 'DELETE_NODE',
+        payload: { nodeId },
+      })
+    }, [dispatch])
+
+    const handleDeleteSelectedNode = useCallback(() => {
+      const selectedNodeId = state.editor.selectedNode.id
+      if (!selectedNodeId) {
+        toast.message('Select a node to delete')
+        return
+      }
+
+      deleteNodeById(selectedNodeId)
+      toast.success('Node deleted')
+    }, [deleteNodeById, state.editor.selectedNode.id])
 
     // Auto-save functionality
     const saveWorkflow = useCallback(async (isAutoSave = false) => {
@@ -169,7 +304,7 @@ const EditorCanvas = () => {
 
     useEffect(() => {
       dispatch({type: 'LOAD_DATA', payload: {edges, elements: nodes }})
-    },[nodes,edges])
+    },[dispatch, nodes, edges])
   
     const nodeTypes = useMemo(
         () => ({
@@ -194,8 +329,8 @@ const EditorCanvas = () => {
       try {
         const response = await onGetNodesEdges(workflowId);
         if (response) {
-          const parsedNodes = JSON.parse(response.nodes!);
-          const parsedEdges = JSON.parse(response.edges!);
+          const parsedNodes = response.nodes ? JSON.parse(response.nodes) : [];
+          const parsedEdges = response.edges ? JSON.parse(response.edges) : [];
           setEdges(parsedEdges);
           setNodes(parsedNodes);
           setLastSaved(new Date())
@@ -224,16 +359,39 @@ const EditorCanvas = () => {
       document.addEventListener('keydown', handleKeyDown)
       return () => document.removeEventListener('keydown', handleKeyDown)
     }, [saveWorkflow])
+
+    useEffect(() => {
+      const handleDeleteKey = (event: KeyboardEvent) => {
+        const target = event.target as HTMLElement | null
+        const tagName = target?.tagName?.toLowerCase()
+        const isTypingTarget =
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          target?.isContentEditable
+
+        if (isTypingTarget) return
+
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          if (state.editor.selectedNode.id) {
+            event.preventDefault()
+            handleDeleteSelectedNode()
+          }
+        }
+      }
+
+      document.addEventListener('keydown', handleDeleteKey)
+      return () => document.removeEventListener('keydown', handleDeleteKey)
+    }, [handleDeleteSelectedNode, state.editor.selectedNode.id])
     
   return (
     <ResizablePanelGroup 
      direction='horizontal' 
-     className=''>
-      <ResizablePanel defaultSize={70}>
-        <div className='flex h-full items-center justify-center'>
+     className='h-full min-h-0'>
+      <ResizablePanel defaultSize={72} className='min-h-0'>
+        <div className='flex h-full min-h-0 items-center justify-center'>
           <div
            style={{ width: '100%', height: '100%' , paddingBottom:'70px'}}
-           className='relative'
+           className='relative min-h-0'
           >
              {isWorkFlowLoading ? (
               <div className="absolute flex h-full w-full items-center justify-center">
@@ -259,7 +417,7 @@ const EditorCanvas = () => {
              className='w-[300px]'
              onDrop={onDrop}
              onDragOver={onDragOver}
-             nodes={state.editor.elements}
+             nodes={nodes}
              onNodesChange={onNodesChange}
              edges={edges}
              onEdgesChange={onEdgesChange}
@@ -267,6 +425,11 @@ const EditorCanvas = () => {
              onInit={setReactFlowInstance}
              fitView
              onClick={handleClickCanvas}
+             snapToGrid
+             snapGrid={[20, 20]}
+             defaultEdgeOptions={{
+              type: 'smoothstep',
+             }}
              nodeTypes={nodeTypes}
             >
               <Controls position='top-left' />
@@ -286,6 +449,20 @@ const EditorCanvas = () => {
             )}
             
             {/* Save status indicator */}
+            <div className="absolute left-4 top-4 flex items-center gap-2 rounded-lg border bg-background/85 px-3 py-2 text-sm backdrop-blur-sm">
+              <button
+                onClick={autoLayoutHierarchy}
+                className="inline-flex items-center gap-2 rounded-md bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-900 transition-colors hover:bg-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800"
+              >
+                <LayoutPanelTop className="h-4 w-4" />
+                Arrange hierarchy
+              </button>
+              <div className="text-xs text-muted-foreground">
+                {hasStarterNode
+                  ? 'Drag from the starter node to build the flow'
+                  : 'Start with either Google Drive or Trigger'}
+              </div>
+            </div>
             <div className="absolute top-4 right-4 flex items-center gap-2 text-sm text-muted-foreground bg-background/80 backdrop-blur-sm px-3 py-2 rounded-lg border">
               {isSaving && (
                 <div className="flex items-center gap-1">
@@ -322,6 +499,14 @@ const EditorCanvas = () => {
               )}
               <div className="flex items-center gap-2 ml-2">
                 <button
+                  onClick={handleDeleteSelectedNode}
+                  disabled={!state.editor.selectedNode.id}
+                  className="text-xs px-2 py-1 rounded transition-colors bg-red-100 text-red-700 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-red-900/20 dark:text-red-400"
+                  title="Delete selected node"
+                >
+                 Delete node
+                </button>
+                <button
                   onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
                   className={`text-xs px-2 py-1 rounded transition-colors ${
                     autoSaveEnabled 
@@ -339,8 +524,8 @@ const EditorCanvas = () => {
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel
-       defaultSize={40}
-       className='relative sm:block'
+       defaultSize={28}
+       className='relative min-h-0 sm:block'
        >
         {isWorkFlowLoading ? (
           <div className="absolute flex h-full w-full items-center justify-center">
@@ -366,7 +551,11 @@ const EditorCanvas = () => {
             edges={edges}
             nodes={nodes}
           >
-            <EditorCanvasSidebar nodes={nodes} />
+            <EditorCanvasSidebar
+             nodes={nodes}
+             onAddNode={addNodeOfType}
+             onArrangeHierarchy={autoLayoutHierarchy}
+            />
           </FlowInstance>
         )}
        </ResizablePanel>

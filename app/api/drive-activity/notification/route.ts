@@ -1,255 +1,314 @@
-import { postContentToWebHook } from '@/app/(main)/(pages)/connections/_actions/discord-connection'
-import { onCreateNewPageInDatabase } from '@/app/(main)/(pages)/connections/_actions/notion-connection'
-import { postMessageToSlack } from '@/app/(main)/(pages)/connections/_actions/slack-connection'
-import { db } from '@/lib/db'
-import { WorkflowExecutionService } from '@/lib/workflow-execution-service'
-import axios from 'axios'
 import { headers } from 'next/headers'
-import { NextRequest } from 'next/server'
+import { db } from '@/lib/db'
+import { executeWorkflow } from '@/lib/workflow-runner'
+import {
+  DEFAULT_DRIVE_EVENT_TYPES,
+  getDriveTriggerEventTypes,
+  getTriggerMetadata,
+  parseWorkflowNodes,
+} from '@/lib/workflow-definition'
+import { clerkClient } from '@clerk/nextjs/server'
+import { google } from 'googleapis'
 
-export async function POST(req: NextRequest) {
-  console.log('🔴 Google Drive change detected')
+type DriveChangeRecord = {
+  removed?: boolean | null
+  fileId?: string | null
+  file?: {
+    name?: string | null
+    trashed?: boolean | null
+    createdTime?: string | null
+    modifiedTime?: string | null
+  } | null
+}
+
+const NOTIFICATION_LOCK_TTL_MS = 10_000
+const NOTIFICATION_DEDUPE_TTL_MS = 30_000
+
+const inflightNotifications = new Map<string, number>()
+const recentNotificationSignatures = new Map<string, number>()
+
+const pruneExpiredEntries = () => {
+  const now = Date.now()
+
+  for (const [key, timestamp] of inflightNotifications.entries()) {
+    if (now - timestamp > NOTIFICATION_LOCK_TTL_MS) {
+      inflightNotifications.delete(key)
+    }
+  }
+
+  for (const [key, timestamp] of recentNotificationSignatures.entries()) {
+    if (now - timestamp > NOTIFICATION_DEDUPE_TTL_MS) {
+      recentNotificationSignatures.delete(key)
+    }
+  }
+}
+
+const classifyDriveChange = (change: DriveChangeRecord) => {
+  if (change.removed || change.file?.trashed) {
+    return 'deleted' as const
+  }
+
+  const createdTime = change.file?.createdTime
+  const modifiedTime = change.file?.modifiedTime
+
+  if (createdTime && modifiedTime) {
+    const createdAt = new Date(createdTime).getTime()
+    const modifiedAt = new Date(modifiedTime).getTime()
+    if (Number.isFinite(createdAt) && Number.isFinite(modifiedAt) && Math.abs(modifiedAt - createdAt) < 15000) {
+      return 'created' as const
+    }
+  }
+
+  return 'updated' as const
+}
+
+const getGoogleDriveChanges = async (userId: string, pageToken: string) => {
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.OAUTH2_REDIRECT_URI
+  )
+
+  const client = await clerkClient()
+  const tokenResponse = await client.users.getUserOauthAccessToken(userId, 'google')
+  const accessToken = tokenResponse.data[0]?.token
+
+  if (!accessToken) {
+    throw new Error('Google OAuth token not found for user')
+  }
+
+  oauth2Client.setCredentials({
+    access_token: accessToken,
+  })
+
+  const drive = google.drive({
+    version: 'v3',
+    auth: oauth2Client,
+  })
+
+  const changes: DriveChangeRecord[] = []
+  let nextPageToken: string | undefined = pageToken
+  let newStartPageToken = pageToken
+
+  while (nextPageToken) {
+    try {
+      const response = await drive.changes.list({
+        pageToken: nextPageToken,
+        spaces: 'drive',
+        includeRemoved: true,
+        fields:
+          'nextPageToken,newStartPageToken,changes(fileId,removed,file(name,trashed,createdTime,modifiedTime))',
+      })
+
+      changes.push(...((response.data.changes as DriveChangeRecord[]) || []))
+      nextPageToken = response.data.nextPageToken || undefined
+      newStartPageToken = response.data.newStartPageToken || newStartPageToken
+
+      if (!response.data.nextPageToken) {
+        break
+      }
+    } catch (error: any) {
+      const status = error?.code || error?.response?.status
+      if (status === 410) {
+        const freshToken = await drive.changes.getStartPageToken({})
+        newStartPageToken = freshToken.data.startPageToken || pageToken
+        nextPageToken = undefined
+        break
+      }
+
+      throw error
+    }
+  }
+
+  return {
+    changes,
+    nextPageToken: newStartPageToken,
+  }
+}
+
+const dedupeDriveChanges = (changes: DriveChangeRecord[]) => {
+  const latestByFileAndType = new Map<string, DriveChangeRecord>()
+
+  changes.forEach((change) => {
+    const eventType = classifyDriveChange(change)
+    const fileId = change.fileId || change.file?.name || 'unknown-file'
+    latestByFileAndType.set(`${fileId}:${eventType}`, change)
+  })
+
+  return Array.from(latestByFileAndType.values())
+}
+
+const buildNotificationSignature = (changes: DriveChangeRecord[]) =>
+  dedupeDriveChanges(changes)
+    .map((change) => {
+      const eventType = classifyDriveChange(change)
+      const fileId = change.fileId || 'unknown-file'
+      const fileName = change.file?.name || 'unknown-name'
+      const modifiedTime = change.file?.modifiedTime || 'unknown-time'
+      return `${eventType}:${fileId}:${fileName}:${modifiedTime}`
+    })
+    .sort()
+    .join('|')
+
+export async function POST() {
   const headersList = await headers()
-  let channelResourceId = headersList.get('x-goog-resource-id');
+  const channelResourceId = headersList.get('x-goog-resource-id')
+  const resourceState = headersList.get('x-goog-resource-state')
 
   if (!channelResourceId) {
-    console.log('No resource ID found in headers')
     return Response.json({ message: 'No resource ID' }, { status: 400 })
   }
 
+  if (resourceState === 'sync') {
+    return Response.json({ message: 'Drive listener synced' }, { status: 200 })
+  }
+
   try {
+    pruneExpiredEntries()
+
+    if (inflightNotifications.has(channelResourceId)) {
+      return Response.json(
+        { message: 'Drive notification already being processed' },
+        { status: 200 }
+      )
+    }
+
+    inflightNotifications.set(channelResourceId, Date.now())
+
     const user = await db.user.findFirst({
       where: {
         googleResourceId: channelResourceId,
       },
-      select: { clerkId: true, credits: true },
-    })
-
-    if (!user) {
-      console.log('User not found for resource ID:', channelResourceId)
-      return Response.json({ message: 'User not found' }, { status: 404 })
-    }
-
-    // Check credits
-    if (user.credits !== 'Unlimited' && parseInt(user.credits!) <= 0) {
-      console.log('Insufficient credits for user:', user.clerkId)
-      return Response.json({ message: 'Insufficient credits' }, { status: 402 })
-    }
-
-    // Get all published workflows for this user
-    const workflows = await db.workflows.findMany({
-      where: {
-        userId: user.clerkId,
-        publish: true, // Only execute published workflows
+      select: {
+        id: true,
+        clerkId: true,
+        credits: true,
+        LocalGoogleCredential: {
+          select: {
+            pageToken: true,
+          },
+        },
       },
     })
 
-    if (!workflows || workflows.length === 0) {
-      console.log('No published workflows found for user:', user.clerkId)
-      return Response.json({ message: 'No workflows to execute' }, { status: 200 })
+    if (!user) {
+      return Response.json({ message: 'User not found' }, { status: 404 })
     }
 
-    // Execute each workflow
-    const executionPromises = workflows.map(async (workflow) => {
-      const startTime = new Date()
-      let overallStatus: 'success' | 'failed' | 'partial' = 'success'
-      let errorMessage: string | undefined
-      const allResults = []
+    if (user.credits !== 'Unlimited' && parseInt(user.credits || '0', 10) <= 0) {
+      return Response.json({ message: 'Insufficient credits' }, { status: 402 })
+    }
 
-      try {
-        console.log(`Executing workflow: ${workflow.name} (${workflow.id})`)
-        
-        if (!workflow.flowPath) {
-          console.log(`No flow path found for workflow: ${workflow.id}`)
-          await WorkflowExecutionService.logExecution({
-            workflowId: workflow.id,
-            userId: user.clerkId,
-            status: 'failed',
-            triggerType: 'google_drive',
-            error: 'No flow path configured',
-            startedAt: startTime,
-          })
-          return { workflowId: workflow.id, status: 'skipped', reason: 'no_flow_path' }
-        }
+    const currentPageToken = user.LocalGoogleCredential?.pageToken
+    if (!currentPageToken) {
+      return Response.json({ message: 'Drive listener is missing its page token' }, { status: 409 })
+    }
 
-        const flowPath = JSON.parse(workflow.flowPath)
-        let currentIndex = 0
-        const results = []
+    const { changes, nextPageToken } = await getGoogleDriveChanges(user.clerkId, currentPageToken)
 
-        while (currentIndex < flowPath.length) {
-          const currentNode = flowPath[currentIndex]
-          console.log(`Executing node: ${currentNode} at index ${currentIndex}`)
+    if (!changes.length) {
+      return Response.json({ message: 'No new Drive changes' }, { status: 200 })
+    }
 
-          try {
-            switch (currentNode) {
-              case 'Discord':
-                const discordWebhook = await db.discordWebhook.findFirst({
-                  where: { userId: workflow.userId },
-                  select: { url: true },
-                })
-                
-                if (discordWebhook && workflow.discordTemplate) {
-                  await postContentToWebHook(workflow.discordTemplate, discordWebhook.url)
-                  results.push({ node: 'Discord', status: 'success' })
-                } else {
-                  results.push({ node: 'Discord', status: 'failed', reason: 'no_webhook_or_template' })
-                  overallStatus = 'partial'
-                }
-                break
+    const uniqueChanges = dedupeDriveChanges(changes)
+    const notificationSignature = `${user.clerkId}:${buildNotificationSignature(uniqueChanges)}`
 
-              case 'Slack':
-                if (workflow.slackAccessToken && workflow.slackTemplate && workflow.slackChannels.length > 0) {
-                  const channels = workflow.slackChannels.map((channel) => ({
-                    label: '',
-                    value: channel,
-                  }))
-                  
-                  await postMessageToSlack(
-                    workflow.slackAccessToken,
-                    channels,
-                    workflow.slackTemplate
-                  )
-                  results.push({ node: 'Slack', status: 'success' })
-                } else {
-                  results.push({ node: 'Slack', status: 'failed', reason: 'missing_config' })
-                  overallStatus = 'partial'
-                }
-                break
+    if (recentNotificationSignatures.has(notificationSignature)) {
+      return Response.json(
+        { message: 'Duplicate Drive notification skipped' },
+        { status: 200 }
+      )
+    }
 
-              case 'Notion':
-                if (workflow.notionAccessToken && workflow.notionDbId && workflow.notionTemplate) {
-                  await onCreateNewPageInDatabase(
-                    workflow.notionDbId,
-                    workflow.notionAccessToken,
-                    JSON.parse(workflow.notionTemplate)
-                  )
-                  results.push({ node: 'Notion', status: 'success' })
-                } else {
-                  results.push({ node: 'Notion', status: 'failed', reason: 'missing_config' })
-                  overallStatus = 'partial'
-                }
-                break
-
-              case 'Wait':
-                // Handle wait logic with cron job
-                const cronResponse = await axios.put(
-                  'https://api.cron-job.org/jobs',
-                  {
-                    job: {
-                      url: `${process.env.NGROK_URI}/api/cron/wait?flow_id=${workflow.id}&current_index=${currentIndex}`,
-                      enabled: 'true',
-                      schedule: {
-                        timezone: 'UTC',
-                        expiresAt: 0,
-                        hours: [-1],
-                        mdays: [-1],
-                        minutes: ['*****'],
-                        months: [-1],
-                        wdays: [-1],
-                      },
-                    },
-                  },
-                  {
-                    headers: {
-                      Authorization: `Bearer ${process.env.CRON_JOB_KEY!}`,
-                      'Content-Type': 'application/json',
-                    },
-                  }
-                )
-                
-                if (cronResponse.status === 200) {
-                  // Update workflow with remaining path
-                  const remainingPath = flowPath.slice(currentIndex + 1)
-                  await db.workflows.update({
-                    where: { id: workflow.id },
-                    data: { cronPath: JSON.stringify(remainingPath) },
-                  })
-                  results.push({ node: 'Wait', status: 'scheduled' })
-                  break // Exit the loop as we're waiting
-                } else {
-                  results.push({ node: 'Wait', status: 'failed', reason: 'cron_schedule_failed' })
-                  overallStatus = 'partial'
-                }
-                break
-
-              default:
-                console.log(`Unknown node type: ${currentNode}`)
-                results.push({ node: currentNode, status: 'failed', reason: 'unknown_node_type' })
-                overallStatus = 'partial'
-                break
-            }
-          } catch (error) {
-            console.error(`Error executing node ${currentNode}:`, error)
-            results.push({ node: currentNode, status: 'failed', reason: 'execution_error', error: error.message })
-            overallStatus = 'partial'
-          }
-
-          currentIndex++
-        }
-
-        // Log the execution
-        await WorkflowExecutionService.logExecution({
-          workflowId: workflow.id,
-          userId: user.clerkId,
-          status: overallStatus,
-          triggerType: 'google_drive',
-          results: results,
-          error: errorMessage,
-          startedAt: startTime,
-        })
-
-        // Deduct credits only if workflow completed successfully
-        if (user.credits !== 'Unlimited') {
-          await db.user.update({
-            where: { clerkId: user.clerkId },
-            data: { credits: `${parseInt(user.credits!) - 1}` },
-          })
-        }
-
-        return { 
-          workflowId: workflow.id, 
-          status: 'completed', 
-          results,
-          creditsDeducted: user.credits !== 'Unlimited' ? 1 : 0
-        }
-
-      } catch (error) {
-        console.error(`Error executing workflow ${workflow.id}:`, error)
-        errorMessage = error.message
-        
-        // Log failed execution
-        await WorkflowExecutionService.logExecution({
-          workflowId: workflow.id,
-          userId: user.clerkId,
-          status: 'failed',
-          triggerType: 'google_drive',
-          error: errorMessage,
-          startedAt: startTime,
-        })
-        
-        return { 
-          workflowId: workflow.id, 
-          status: 'failed', 
-          error: error.message 
-        }
-      }
+    await db.localGoogleCredential.updateMany({
+      where: {
+        userId: user.id,
+      },
+      data: {
+        pageToken: nextPageToken,
+      },
     })
 
-    const executionResults = await Promise.all(executionPromises)
-    
-    console.log('Workflow execution completed:', executionResults)
-    
-    return Response.json({
-      message: 'Workflows executed',
-      results: executionResults,
-      userCredits: user.credits,
-    }, { status: 200 })
+    recentNotificationSignatures.set(notificationSignature, Date.now())
 
+    const detectedEventTypes = Array.from(
+      new Set(uniqueChanges.map(classifyDriveChange))
+    )
+
+    const workflows = await db.workflows.findMany({
+      where: {
+        userId: user.clerkId,
+        publish: true,
+      },
+    })
+
+    const googleDriveWorkflows = workflows.filter((workflow) => {
+      const nodes = parseWorkflowNodes(workflow.nodes)
+      const triggerMetadata = getTriggerMetadata(nodes)
+      if (triggerMetadata.triggerType !== 'google_drive') {
+        return false
+      }
+
+      const requiredEventTypes = getDriveTriggerEventTypes(nodes)
+      const activeEventTypes =
+        requiredEventTypes.length > 0 ? requiredEventTypes : DEFAULT_DRIVE_EVENT_TYPES
+
+      return activeEventTypes.some((eventType) => detectedEventTypes.includes(eventType))
+    })
+
+    if (!googleDriveWorkflows.length) {
+      return Response.json(
+        {
+          message: 'No workflows matched the detected Drive changes',
+          detectedEventTypes,
+        },
+        { status: 200 }
+      )
+    }
+
+    const executionResults = await Promise.all(
+      googleDriveWorkflows.map((workflow) =>
+        executeWorkflow({
+          workflow,
+          triggerType: 'google_drive',
+        })
+      )
+    )
+
+    const completedExecutions = executionResults.filter(
+      (result) => result.status === 'completed'
+    ).length
+
+    if (completedExecutions > 0 && user.credits !== 'Unlimited') {
+      const nextCredits = Math.max(
+        0,
+        parseInt(user.credits || '0', 10) - completedExecutions
+      )
+
+      await db.user.update({
+        where: { clerkId: user.clerkId },
+        data: { credits: `${nextCredits}` },
+      })
+    }
+
+    return Response.json(
+      {
+        message: 'Workflows executed',
+        detectedEventTypes,
+        processedChanges: uniqueChanges.length,
+        results: executionResults,
+      },
+      { status: 200 }
+    )
   } catch (error) {
-    console.error('Error in notification handler:', error)
-    return Response.json({
-      message: 'Internal server error',
-      error: error.message
-    }, { status: 500 })
+    return Response.json(
+      {
+        message: 'Internal server error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    )
+  } finally {
+    inflightNotifications.delete(channelResourceId)
   }
 }

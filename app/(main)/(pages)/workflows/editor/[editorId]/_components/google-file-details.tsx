@@ -7,13 +7,14 @@ type Props = {
     nodeConnection: ConnectionProviderProps
     title: string
     gFile: any
+    onInsertToken?: (template: string) => void
 }
 
 const isGoogleFileNotEmpty = (file: any): boolean  => {
     return Object.keys(file).length > 0 && file.kind !== '';
 }
 
-const GoogleFileDetails = ({ nodeConnection, title, gFile}: Props) => {
+const GoogleFileDetails = ({ nodeConnection, title, gFile, onInsertToken}: Props) => {
     if(!isGoogleFileNotEmpty(gFile)) {
         return null
     }
@@ -28,9 +29,10 @@ const GoogleFileDetails = ({ nodeConnection, title, gFile}: Props) => {
                 {details.map((detail) => (
                     <div
                      key={detail}
-                     onClick={() => 
+                     onClick={() => {
                         onAddTemplate(nodeConnection, title, gFile[detail])
-                     }
+                        onInsertToken?.(gFile[detail])
+                     }}
                      className='flex cursor-pointer gap-2 rounded-full bg-white px-3 py-1 text-gray-500'
                     >
                         {detail}:{' '}
